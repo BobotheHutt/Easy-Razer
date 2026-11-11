@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using EasyRazer.Devices;
 
 namespace EasyRazer.UI;
@@ -20,6 +21,7 @@ public sealed class DeviceLayoutView : Control
     private PointF _offset;
 
     /// <summary>Supplies text + source for a button id.</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Func<string, (string Text, BindingSource Source)>? Describe { get; set; }
 
     public event Action<string>? ButtonClicked;
@@ -32,12 +34,14 @@ public sealed class DeviceLayoutView : Control
         Cursor = Cursors.Default;
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<LayoutShape> Shapes
     {
         get => _shapes;
         set { _shapes = value; _hover = null; Invalidate(); }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string? SelectedButton
     {
         get => _selected;
@@ -45,6 +49,7 @@ public sealed class DeviceLayoutView : Control
     }
 
     /// <summary>Button currently waiting for a key press (drawn in yellow), or null.</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string? RecordingButton
     {
         get => _recording;

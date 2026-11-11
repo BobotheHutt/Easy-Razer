@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using EasyRazer.Devices;
 
 namespace EasyRazer.UI;
@@ -28,6 +29,7 @@ public sealed class KeyboardView : Control
     }
 
     /// <summary>The key to highlight as the current choice (null = none).</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Keys? ChosenKey
     {
         get => _chosen;
@@ -35,6 +37,7 @@ public sealed class KeyboardView : Control
     }
 
     /// <summary>Keys being held down right now while recording (drawn highlighted).</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyCollection<Keys> HeldKeys
     {
         get => _held;
@@ -42,6 +45,7 @@ public sealed class KeyboardView : Control
     }
 
     /// <summary>Keys that can't be picked (drawn greyed out), e.g. Escape.</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyCollection<Keys> DisabledKeys
     {
         get => _disabled;

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using EasyRazer.Config;
 
 namespace EasyRazer.UI;
@@ -137,6 +138,7 @@ public sealed class BindingPicker : UserControl
         ShowNothingSelected();
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool EscapeCancels
     {
         get => _escapeCancels.Checked;

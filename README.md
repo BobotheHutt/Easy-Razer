@@ -61,7 +61,7 @@ doesn't work (tray icon → Open log).
 
 ## Building from source
 
-Needs the .NET 8 SDK.
+Needs the .NET 10 SDK.
 
 ```
 dotnet publish src/EasyRazer/EasyRazer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
