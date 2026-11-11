@@ -3,18 +3,29 @@ using EasyRazer.Config;
 namespace EasyRazer.UI;
 
 /// <summary>
-/// Everything a button can be set to, all clickable: an on-screen keyboard, Ctrl/Shift/Alt toggles,
-/// mouse actions, Disable and Reset. Raises <see cref="ActionChosen"/> on every click.
+/// The bottom half of the keybind editor. While a button is being recorded it shows the keys
+/// being pressed live. Otherwise you can also click a key on the on-screen keyboard, a mouse action,
+/// Disable or Reset. Raises <see cref="ActionChosen"/> when something is clicked.
 /// </summary>
 public sealed class BindingPicker : UserControl
 {
+    private static readonly Color ChosenFill = Color.FromArgb(40, 90, 30);
+
     private readonly Label _header = new()
     {
         Dock = DockStyle.Top,
-        Height = 30,
-        Font = new Font("Segoe UI", 11f, FontStyle.Bold),
+        Height = 34,
+        Font = new Font("Segoe UI", 12f, FontStyle.Bold),
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(4, 0, 0, 0),
+    };
+    private readonly Button _cancel = Flat("Cancel");
+    private readonly CheckBox _escapeCancels = new()
+    {
+        Text = "Escape cancels (Escape can't be bound)",
+        AutoSize = true,
+        ForeColor = Theme.Text,
+        Padding = new Padding(0, 6, 0, 0),
     };
     private readonly KeyboardView _keyboard = new() { Dock = DockStyle.Fill };
     private readonly CheckBox _ctrl = Toggle("Ctrl");
@@ -26,8 +37,11 @@ public sealed class BindingPicker : UserControl
 
     private KeyAction? _current; // what's set in this profile (null = not set)
     private bool _loading;
+    private bool _hasButton;
 
     public event Action<KeyAction>? ActionChosen;
+    public event Action? CancelClicked;
+    public event Action<bool>? EscapeCancelsChanged;
 
     public BindingPicker()
     {
@@ -63,13 +77,28 @@ public sealed class BindingPicker : UserControl
         }
         _disable.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Disabled });
         _reset.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Default });
+        _cancel.Click += (_, _) => CancelClicked?.Invoke();
+        _cancel.Visible = false;
 
-        var modRow = Row(new Label { Text = "Hold with key:", AutoSize = true, ForeColor = Theme.TextDim, Padding = new Padding(0, 8, 4, 0) },
-            _ctrl, _shift, _alt,
-            new Label { Text = "   (turn these on, then click a key)", AutoSize = true, ForeColor = Theme.TextDim, Padding = new Padding(0, 8, 0, 0) });
-        var mouseRow = Row(new Label { Text = "Mouse:", AutoSize = true, ForeColor = Theme.TextDim, Padding = new Padding(0, 8, 4, 0) });
-        mouseRow.Controls.AddRange(_mouseButtons.ToArray<Control>());
-        var otherRow = Row(_disable, _reset);
+        _escapeCancels.CheckedChanged += (_, _) =>
+        {
+            _keyboard.DisabledKeys = _escapeCancels.Checked ? new[] { Keys.Escape } : Array.Empty<Keys>();
+            if (!_loading) EscapeCancelsChanged?.Invoke(_escapeCancels.Checked);
+        };
+
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, WrapContents = false };
+        top.Controls.AddRange(new Control[] { _escapeCancels, _cancel });
+
+        var hint = Dim("Or click instead:  hold with");
+        var modRow = Row(hint, _ctrl, _shift, _alt, Dim("then click a key above"));
+        var mouseRow = Row(Dim("Mouse:"));
+        mouseRow.Controls.AddRange(_mouseButtons
+            .Where(b => (MouseAction)b.Tag! is not (MouseAction.DpiUp or MouseAction.DpiDown)).ToArray<Control>());
+        var otherRow = Row(Dim("Other:"));
+        otherRow.Controls.AddRange(_mouseButtons
+            .Where(b => (MouseAction)b.Tag! is MouseAction.DpiUp or MouseAction.DpiDown).ToArray<Control>());
+        otherRow.Controls.Add(_disable);
+        otherRow.Controls.Add(_reset);
 
         var bottom = new FlowLayoutPanel
         {
@@ -83,16 +112,47 @@ public sealed class BindingPicker : UserControl
 
         Controls.Add(_keyboard);
         Controls.Add(bottom);
+        Controls.Add(top);
         Controls.Add(_header);
         ShowNothingSelected();
     }
 
+    public bool EscapeCancels
+    {
+        get => _escapeCancels.Checked;
+        set
+        {
+            _loading = true;
+            _escapeCancels.Checked = value;
+            _keyboard.DisabledKeys = value ? new[] { Keys.Escape } : Array.Empty<Keys>();
+            _loading = false;
+        }
+    }
+
     public void ShowNothingSelected()
     {
+        _hasButton = false;
         _current = null;
-        _header.Text = "Click a button on the device above to change it.";
+        _header.Text = "Click a button on the device above, then press the key or combo you want.";
         _header.ForeColor = Theme.TextDim;
+        _cancel.Visible = false;
         SetEnabled(false);
+        _keyboard.ChosenKey = null;
+        _keyboard.HeldKeys = Array.Empty<Keys>();
+        HighlightMouse(null);
+    }
+
+    /// <summary>Recording: show the combo built so far and the keys currently held.</summary>
+    public void ShowRecording(string label, KeyAction soFar, IReadOnlyCollection<Keys> held)
+    {
+        var combo = soFar.Key == null ? "" : KeyLabels.Action(soFar).Replace("+", " + ");
+        var cancelHint = EscapeCancels ? "Esc to cancel" : "click Cancel to stop";
+        _header.Text = combo.Length == 0
+            ? $"{label}:  press a key or combo…   ({cancelHint})"
+            : $"{label}:  {combo}   (let go to set it)";
+        _header.ForeColor = Theme.Recording;
+        _cancel.Visible = true;
+        _keyboard.HeldKeys = held;
         _keyboard.ChosenKey = null;
         HighlightMouse(null);
     }
@@ -103,6 +163,7 @@ public sealed class BindingPicker : UserControl
     /// <param name="source">Where <paramref name="effective"/> comes from.</param>
     public void ShowButton(string label, KeyAction? setHere, KeyAction effective, BindingSource source)
     {
+        _hasButton = true;
         _current = setHere;
         var from = source switch
         {
@@ -110,8 +171,9 @@ public sealed class BindingPicker : UserControl
             BindingSource.Inherited => "  (from Default profile)",
             _ => "  (factory)",
         };
-        _header.Text = $"{label}  →  {KeyLabels.Action(effective)}{from}";
+        _header.Text = $"{label}  →  {KeyLabels.Action(effective)}{from}      click the button again to re-record";
         _header.ForeColor = source == BindingSource.Custom ? Theme.Custom : source == BindingSource.Inherited ? Theme.Inherited : Theme.Text;
+        _cancel.Visible = false;
         SetEnabled(true);
 
         _loading = true;
@@ -120,14 +182,16 @@ public sealed class BindingPicker : UserControl
         _alt.Checked = effective.Type == ActionType.Key && effective.Alt;
         _loading = false;
 
+        _keyboard.HeldKeys = Array.Empty<Keys>();
         _keyboard.ChosenKey = effective.Type == ActionType.Key && Enum.TryParse<Keys>(effective.Key, out var k) ? k : null;
         HighlightMouse(effective.Type == ActionType.Mouse ? effective.Mouse : null);
-        _disable.BackColor = effective.Type == ActionType.Disabled ? Color.FromArgb(40, 90, 30) : Theme.Key;
+        _disable.BackColor = effective.Type == ActionType.Disabled ? ChosenFill : Theme.Key;
         _reset.Enabled = setHere != null;
     }
 
     private void Emit(KeyAction action)
     {
+        if (!_hasButton) return;
         _current = action.Type == ActionType.Default ? null : action;
         ActionChosen?.Invoke(action);
     }
@@ -142,8 +206,11 @@ public sealed class BindingPicker : UserControl
     private void HighlightMouse(MouseAction? m)
     {
         foreach (var b in _mouseButtons)
-            b.BackColor = m.HasValue && (MouseAction)b.Tag! == m.Value ? Color.FromArgb(40, 90, 30) : Theme.Key;
+            b.BackColor = m.HasValue && (MouseAction)b.Tag! == m.Value ? ChosenFill : Theme.Key;
     }
+
+    private static Label Dim(string text) =>
+        new() { Text = text, AutoSize = true, ForeColor = Theme.TextDim, Padding = new Padding(0, 8, 4, 0) };
 
     private static CheckBox Toggle(string text) => new()
     {
@@ -155,7 +222,7 @@ public sealed class BindingPicker : UserControl
         FlatStyle = FlatStyle.Flat,
         BackColor = Theme.Key,
         ForeColor = Theme.Text,
-        FlatAppearance = { CheckedBackColor = Color.FromArgb(40, 90, 30), BorderColor = Theme.Outline },
+        FlatAppearance = { CheckedBackColor = ChosenFill, BorderColor = Theme.Outline },
     };
 
     private static Button Flat(string text) => new()

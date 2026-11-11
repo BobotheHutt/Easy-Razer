@@ -19,6 +19,8 @@ public sealed class NagaTrinity : RazerKeymapDevice
     {
         new("right", "Right click", null, M(MouseAction.Right)),
         new("middle", "Wheel click", null, M(MouseAction.Middle)),
+        new("under-wheel-1", "Under wheel (front)", null, M(MouseAction.DpiUp)),
+        new("under-wheel-2", "Under wheel (back)", null, M(MouseAction.DpiDown)),
         new("side01", "Side 1", null, K(Keys.D1)),
         new("side02", "Side 2", null, K(Keys.D2)),
         new("side03", "Side 3", null, K(Keys.D3)),
@@ -41,9 +43,11 @@ public sealed class NagaTrinity : RazerKeymapDevice
         {
             Deco("Top", 0, -9, 44, 6, ShapeKind.Label),
             Deco("", 0, 0, 44, 80, ShapeKind.Outline),
-            Deco("Left click (fixed)", 2, 2, 16, 30, ShapeKind.Fixed),
-            Btn("right", "Right click", 26, 2, 16, 30),
-            Btn("middle", "Wheel click", 18.5f, 6, 7, 20),
+            Deco("Left click (fixed)", 2, 2, 15, 34, ShapeKind.Fixed),
+            Btn("right", "Right click", 27, 2, 15, 34),
+            Btn("middle", "Wheel click", 18, 3, 8, 15),
+            Btn("under-wheel-1", "Front", 18, 20, 8, 7.5f),
+            Btn("under-wheel-2", "Back", 18, 28.5f, 8, 7.5f),
 
             Deco("Side plate (12-button)", 56, -9, 46, 6, ShapeKind.Label),
             Deco("", 56, 6, 46, 60, ShapeKind.Outline),

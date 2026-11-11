@@ -13,6 +13,7 @@ public sealed class DeviceLayoutView : Control
     private IReadOnlyList<LayoutShape> _shapes = Array.Empty<LayoutShape>();
     private string? _hover;
     private string? _selected;
+    private string? _recording;
 
     // Layout units -> pixels
     private float _scale = 1;
@@ -41,6 +42,13 @@ public sealed class DeviceLayoutView : Control
     {
         get => _selected;
         set { _selected = value; Invalidate(); }
+    }
+
+    /// <summary>Button currently waiting for a key press (drawn in yellow), or null.</summary>
+    public string? RecordingButton
+    {
+        get => _recording;
+        set { _recording = value; Invalidate(); }
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -88,6 +96,8 @@ public sealed class DeviceLayoutView : Control
         var (text, source) = Describe?.Invoke(id) ?? ("", BindingSource.Factory);
         var isSelected = id == _selected;
         var isHover = id == _hover;
+        var isRecording = id == _recording;
+        if (isRecording) text = "press keys…";
 
         using (var path = s.Kind == ShapeKind.Round ? Ellipse(r) : KeyCapRenderer.Rounded(r, 1.5f * _scale))
         {
@@ -100,7 +110,8 @@ public sealed class DeviceLayoutView : Control
                 BindingSource.Inherited => Theme.Inherited,
                 _ => Theme.Outline,
             };
-            using var border = new Pen(isSelected ? Theme.Selected : accent, isSelected ? 3 : source == BindingSource.Factory ? 1 : 2);
+            var borderColor = isRecording ? Theme.Recording : isSelected ? Theme.Selected : accent;
+            using var border = new Pen(borderColor, isRecording || isSelected ? 3 : source == BindingSource.Factory ? 1 : 2);
             g.DrawPath(border, path);
         }
 
@@ -109,7 +120,9 @@ public sealed class DeviceLayoutView : Control
         var captionRect = new RectangleF(r.X + 2, r.Y + 1, r.Width - 4, captionH);
         var bodyRect = new RectangleF(r.X + 3, r.Y + captionH, r.Width - 6, r.Height - captionH - 2);
         KeyCapRenderer.FitText(g, s.Caption, captionRect, Theme.TextDim, 11);
-        var textColor = source == BindingSource.Factory ? Theme.Text : source == BindingSource.Custom ? Theme.Custom : Theme.Inherited;
+        var textColor = isRecording ? Theme.Recording
+            : source == BindingSource.Factory ? Theme.Text
+            : source == BindingSource.Custom ? Theme.Custom : Theme.Inherited;
         KeyCapRenderer.FitText(g, text, bodyRect, textColor, 15, FontStyle.Bold);
     }
 

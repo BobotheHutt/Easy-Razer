@@ -49,6 +49,8 @@ public sealed class SettingsForm : Form
     // General tab
     private readonly CheckBox _autostart = new() { Text = "Start Easy Razer with Windows", AutoSize = true };
 
+    private readonly KeyRecorder _recorder = new();
+
     public event Action? Saved;
 
     public SettingsForm(ProfileEngine engine)
@@ -85,6 +87,9 @@ public sealed class SettingsForm : Form
         Controls.Add(bottom);
 
         FormClosing += OnClosing;
+        FormClosed += (_, _) => _recorder.Dispose();
+        // Never keep listening to the keyboard once you leave this window.
+        Deactivate += (_, _) => _recorder.Cancel();
         LoadFromConfig();
     }
 
@@ -133,11 +138,36 @@ public sealed class SettingsForm : Form
         };
 
         foreach (var d in _engine.Devices) _deviceKind.Items.Add(d.DisplayName);
-        _deviceKind.SelectedIndexChanged += (_, _) => ShowDeviceLayout();
+        _deviceKind.SelectedIndexChanged += (_, _) => { _recorder.Cancel(); ShowDeviceLayout(); };
 
         _layout.Describe = DescribeButton;
-        _layout.ButtonClicked += _ => ShowSelectedButton();
+        _layout.ButtonClicked += StartRecording;
         _picker.ActionChosen += SetSelectedButton;
+        _picker.CancelClicked += () => _recorder.Cancel();
+        _picker.EscapeCancelsChanged += on =>
+        {
+            // A viewing preference: saved straight away, doesn't need the Save button.
+            _cfg.EscapeCancels = on;
+            _engine.Config.EscapeCancels = on;
+            _recorder.EscapeCancels = on;
+            try { ConfigStore.Save(_engine.Config); } catch (Exception ex) { Log.Error("Saving Escape setting failed", ex); }
+        };
+
+        _recorder.Changed += (soFar, held) =>
+        {
+            if (CurrentButtonLabel() is { } label) _picker.ShowRecording(label, soFar, held);
+        };
+        _recorder.Completed += action =>
+        {
+            _layout.RecordingButton = null;
+            if (action.Key == null) ShowSelectedButton();
+            else SetSelectedButton(action);
+        };
+        _recorder.Cancelled += () =>
+        {
+            _layout.RecordingButton = null;
+            ShowSelectedButton();
+        };
 
         var legend = new Label
         {
@@ -185,7 +215,7 @@ public sealed class SettingsForm : Form
         split.Controls.Add(left, 0, 0);
         split.Controls.Add(right, 1, 0);
 
-        _profiles.SelectedIndexChanged += (_, _) => ShowProfile();
+        _profiles.SelectedIndexChanged += (_, _) => { _recorder.Cancel(); ShowProfile(); };
         page.Controls.Add(split);
         return page;
     }
@@ -258,19 +288,38 @@ public sealed class SettingsForm : Form
         _picker.ShowButton(def.Label, setHere, action, source);
     }
 
+    private string? CurrentButtonLabel()
+    {
+        var id = _layout.SelectedButton;
+        return id == null ? null : SelectedDevice?.Buttons.FirstOrDefault(b => b.Id == id)?.Label;
+    }
+
+    /// <summary>Clicking a button on the device starts listening for the new key/combo.</summary>
+    private void StartRecording(string buttonId)
+    {
+        _recorder.Cancel();
+        _layout.SelectedButton = buttonId;
+        _layout.RecordingButton = buttonId;
+        ShowSelectedButton(); // fills in the picker for this button (mouse/disable buttons still usable)
+        _recorder.EscapeCancels = _cfg.EscapeCancels;
+        _recorder.Start();
+        if (CurrentButtonLabel() is { } label) _picker.ShowRecording(label, new KeyAction(), Array.Empty<Keys>());
+    }
+
     private void SetSelectedButton(KeyAction action)
     {
+        // Picking something with the mouse while recording finishes the recording.
+        if (_recorder.IsRecording)
+        {
+            _recorder.Stop();
+            _layout.RecordingButton = null;
+        }
+
         if (SelectedProfile is not { } p || SelectedDevice is not { } d || _layout.SelectedButton is not { } id) return;
         var map = p.BindingsFor(d.KindId);
-        if (action.Type == ActionType.Default)
-        {
-            if (!map.Remove(id)) return;
-        }
-        else
-        {
-            map[id] = action;
-        }
-        MarkDirty();
+        var changed = action.Type == ActionType.Default ? map.Remove(id) : true;
+        if (action.Type != ActionType.Default) map[id] = action;
+        if (changed) MarkDirty();
         _layout.Invalidate();
         ShowSelectedButton();
     }
@@ -530,6 +579,8 @@ public sealed class SettingsForm : Form
 
     private void LoadFromConfig()
     {
+        _picker.EscapeCancels = _cfg.EscapeCancels;
+        _recorder.EscapeCancels = _cfg.EscapeCancels;
         FillProfiles();
         if (_deviceKind.Items.Count > 0) _deviceKind.SelectedIndex = 0;
         _swatch.BackColor = ColorTranslator.FromHtml(_cfg.Color);

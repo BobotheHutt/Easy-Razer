@@ -19,6 +19,9 @@ public sealed class AppConfig
 
     public bool PauseSwitching { get; set; }
 
+    /// <summary>When recording a bind, Escape cancels and can never be bound.</summary>
+    public bool EscapeCancels { get; set; } = true;
+
     [JsonIgnore]
     public Profile DefaultProfile
     {
@@ -124,6 +127,8 @@ public enum MouseAction
     Forward,
     ScrollUp,
     ScrollDown,
+    DpiUp,
+    DpiDown,
 }
 
 public sealed class KeyAction

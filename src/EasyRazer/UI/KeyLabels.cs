@@ -47,6 +47,8 @@ public static class KeyLabels
         MouseAction.Forward => "Mouse fwd",
         MouseAction.ScrollUp => "Scroll up",
         MouseAction.ScrollDown => "Scroll down",
+        MouseAction.DpiUp => "DPI up",
+        MouseAction.DpiDown => "DPI down",
         _ => m.ToString(),
     };
 

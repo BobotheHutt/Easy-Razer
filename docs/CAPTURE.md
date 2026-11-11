@@ -33,9 +33,12 @@ You need Synapse installed for this step, so do it **before** uninstalling Synap
    7. Side button 1 → back to default (Synapse's reset button for that key)
    8. Then bind each button below to a different letter, in this order, writing each down:
       side 2 → A, side 3 → B, side 4 → C, side 5 → D, side 6 → E, side 7 → F, side 8 → G,
-      side 9 → H, side 10 → I, side 11 → J, side 12 → L, right click → M, wheel click → N
-   9. Switch Synapse to a different profile, then back.
-   10. Use Synapse's "reset to default" for the whole device, if it has one.
+      side 9 → H, side 10 → I, side 11 → J, side 12 → L, right click → M, wheel click → N,
+      front button under the wheel → O, back button under the wheel → P
+   9. Front button under the wheel → back to **DPI up** (Synapse's sensitivity option), then the
+      back one → **DPI down**
+   10. Switch Synapse to a different profile, then back.
+   11. Use Synapse's "reset to default" for the whole device, if it has one.
 3. Press the red square (Stop) in Wireshark.
 4. **File → Save As**, name it `naga-trinity.pcapng`.
 

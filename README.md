@@ -12,7 +12,7 @@ Not included: Chroma effects, macros, cloud sync, firmware updates, audio settin
 
 | Part | How |
 |---|---|
-| Spotting the game | Windows notifies the app whenever a different window comes to the front (`SetWinEventHook`). The app reads that program's exe name and looks for a profile. Nothing is injected into games and no keyboard hooks are used. |
+| Spotting the game | Windows notifies the app whenever a different window comes to the front (`SetWinEventHook`). The app reads that program's exe name and looks for a profile. Nothing is injected into games. The only keyboard hook is while you're recording a bind in the settings window; it's removed as soon as the bind is set, cancelled, or you leave the window. |
 | Keybinds | Written into the device's own memory over USB (HID feature reports, same channel Synapse uses). The device itself sends the remapped key, so games and anti-cheat just see a normal key press. Game profiles go to the device's live memory (no flash wear); the Default profile is also stored permanently so the device behaves even when the app isn't running. |
 | Lighting | OpenRGB runs hidden as a local server; the app asks it to set every device to your color. Prefers each device's hardware "Static" mode so the device remembers it. |
 | Re-applying | At startup, after sleep, and when a device is plugged back in. |

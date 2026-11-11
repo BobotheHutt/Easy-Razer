@@ -21,6 +21,7 @@ public abstract class RazerKeymapDevice : IKeymapDevice
     protected const byte ActionDisabled = 0x00;
     protected const byte ActionMouse = 0x01;
     protected const byte ActionKeyboard = 0x02;
+    protected const byte ActionDpi = 0x06;
 
     private RazerHidLink? _link;
     private string _status = "Not detected";
@@ -116,6 +117,10 @@ public abstract class RazerKeymapDevice : IKeymapDevice
             case ActionType.Disabled:
                 type = ActionDisabled;
                 parameters = Array.Empty<byte>();
+                break;
+            case ActionType.Mouse when action.Mouse is MouseAction.DpiUp or MouseAction.DpiDown:
+                type = ActionDpi;
+                parameters = new byte[] { action.Mouse == MouseAction.DpiUp ? (byte)0x01 : (byte)0x02 };
                 break;
             case ActionType.Mouse:
                 type = ActionMouse;

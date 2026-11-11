@@ -21,6 +21,8 @@ public static class Theme
     public static readonly Color Inherited = Color.FromArgb(80, 160, 255);
     /// <summary>Key currently chosen on the on-screen keyboard.</summary>
     public static readonly Color Chosen = Color.FromArgb(68, 214, 44);
+    /// <summary>Waiting for / showing keys being recorded.</summary>
+    public static readonly Color Recording = Color.FromArgb(255, 200, 40);
 }
 
 public static class KeyCapRenderer

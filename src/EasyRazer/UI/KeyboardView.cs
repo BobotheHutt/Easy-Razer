@@ -13,6 +13,8 @@ public sealed class KeyboardView : Control
 
     private Keys? _hover;
     private Keys? _chosen;
+    private IReadOnlyCollection<Keys> _held = Array.Empty<Keys>();
+    private IReadOnlyCollection<Keys> _disabled = Array.Empty<Keys>();
     private float _unit = 30;
     private PointF _offset;
 
@@ -32,6 +34,20 @@ public sealed class KeyboardView : Control
         set { _chosen = value; Invalidate(); }
     }
 
+    /// <summary>Keys being held down right now while recording (drawn highlighted).</summary>
+    public IReadOnlyCollection<Keys> HeldKeys
+    {
+        get => _held;
+        set { _held = value; Invalidate(); }
+    }
+
+    /// <summary>Keys that can't be picked (drawn greyed out), e.g. Escape.</summary>
+    public IReadOnlyCollection<Keys> DisabledKeys
+    {
+        get => _disabled;
+        set { _disabled = value; Invalidate(); }
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -42,15 +58,23 @@ public sealed class KeyboardView : Control
         foreach (var c in Caps)
         {
             var r = Rect(c);
-            var chosen = c.Key == _chosen;
-            var hover = c.Key == _hover;
+            var disabled = _disabled.Contains(c.Key);
+            var held = _held.Contains(c.Key);
+            var chosen = !held && c.Key == _chosen;
+            var hover = !disabled && c.Key == _hover;
             using var path = KeyCapRenderer.Rounded(r, _unit * 0.12f);
-            using var fill = new SolidBrush(chosen ? Color.FromArgb(40, 90, 30) : hover ? Theme.KeyHover : Theme.Key);
+            var fillColor = disabled ? Theme.KeyFixed
+                : held ? Color.FromArgb(110, 90, 20)
+                : chosen ? Color.FromArgb(40, 90, 30)
+                : hover ? Theme.KeyHover : Theme.Key;
+            using var fill = new SolidBrush(fillColor);
             g.FillPath(fill, path);
-            using var pen = new Pen(chosen ? Theme.Chosen : Theme.Outline, chosen ? 2 : 1);
+            var border = held ? Theme.Recording : chosen ? Theme.Chosen : Theme.Outline;
+            using var pen = new Pen(border, held || chosen ? 2 : 1);
             g.DrawPath(pen, path);
+            var textColor = disabled ? Theme.TextDim : held ? Theme.Recording : chosen ? Theme.Chosen : Theme.Text;
             KeyCapRenderer.FitText(g, KeyLabels.Key(c.Key), new RectangleF(r.X + 2, r.Y + 2, r.Width - 4, r.Height - 4),
-                chosen ? Theme.Chosen : Theme.Text, _unit * 0.36f);
+                textColor, _unit * 0.36f);
         }
     }
 
@@ -98,7 +122,7 @@ public sealed class KeyboardView : Control
     protected override void OnMouseClick(MouseEventArgs e)
     {
         base.OnMouseClick(e);
-        if (HitTest(e.Location) is { } k) KeyClicked?.Invoke(k);
+        if (HitTest(e.Location) is { } k && !_disabled.Contains(k)) KeyClicked?.Invoke(k);
     }
 
     private static List<Cap> Build()
