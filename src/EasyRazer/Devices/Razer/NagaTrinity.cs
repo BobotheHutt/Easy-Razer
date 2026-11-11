@@ -1,4 +1,5 @@
 using EasyRazer.Config;
+using static EasyRazer.Devices.LayoutShape;
 
 namespace EasyRazer.Devices.Razer;
 
@@ -31,4 +32,26 @@ public sealed class NagaTrinity : RazerKeymapDevice
         new("side11", "Side 11", null, K(Keys.OemMinus)),
         new("side12", "Side 12", null, K(Keys.Oemplus)),
     };
+
+    public override IReadOnlyList<LayoutShape> Layout { get; } = BuildLayout();
+
+    private static List<LayoutShape> BuildLayout()
+    {
+        var shapes = new List<LayoutShape>
+        {
+            Deco("Top", 0, -9, 44, 6, ShapeKind.Label),
+            Deco("", 0, 0, 44, 80, ShapeKind.Outline),
+            Deco("Left click (fixed)", 2, 2, 16, 30, ShapeKind.Fixed),
+            Btn("right", "Right click", 26, 2, 16, 30),
+            Btn("middle", "Wheel click", 18.5f, 6, 7, 20),
+
+            Deco("Side plate (12-button)", 56, -9, 46, 6, ShapeKind.Label),
+            Deco("", 56, 6, 46, 60, ShapeKind.Outline),
+        };
+        var n = 1;
+        for (var row = 0; row < 4; row++)
+        for (var col = 0; col < 3; col++, n++)
+            shapes.Add(Btn($"side{n:00}", n.ToString(), 58.5f + col * 14.5f, 9 + row * 14, 13, 12));
+        return shapes;
+    }
 }

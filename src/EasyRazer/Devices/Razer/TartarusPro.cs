@@ -1,4 +1,5 @@
 using EasyRazer.Config;
+using static EasyRazer.Devices.LayoutShape;
 
 namespace EasyRazer.Devices.Razer;
 
@@ -43,4 +44,27 @@ public sealed class TartarusPro : RazerKeymapDevice
         new("wheel-down", "Scroll down", null, M(MouseAction.ScrollDown)),
         new("wheel-click", "Scroll click", null, M(MouseAction.Middle)),
     };
+
+    public override IReadOnlyList<LayoutShape> Layout { get; } = BuildLayout();
+
+    private static List<LayoutShape> BuildLayout()
+    {
+        const float key = 10f, pitch = 11.5f;
+        var shapes = new List<LayoutShape> { Deco("", -4, -5, 92, 72, ShapeKind.Outline) };
+        var n = 1;
+        for (var row = 0; row < 4; row++)
+        for (var col = 0; col < (row == 3 ? 4 : 5); col++, n++)
+            shapes.Add(Btn($"key{n:00}", n.ToString("00"), col * pitch, row * pitch, key, key));
+
+        shapes.Add(Btn("wheel-up", "Wheel up", 61, 0, 12, 7));
+        shapes.Add(Btn("wheel-click", "Wheel click", 61, 8, 12, 7));
+        shapes.Add(Btn("wheel-down", "Wheel down", 61, 16, 12, 7));
+
+        shapes.Add(Btn("thumb-up", "Pad up", 63, 32, 10, 8));
+        shapes.Add(Btn("thumb-left", "Pad left", 52, 41, 10, 8));
+        shapes.Add(Btn("thumb-right", "Pad right", 74, 41, 10, 8));
+        shapes.Add(Btn("thumb-down", "Pad down", 63, 50, 10, 8));
+        shapes.Add(Btn("key20", "20 (thumb)", 46, 54, 14, 10));
+        return shapes;
+    }
 }

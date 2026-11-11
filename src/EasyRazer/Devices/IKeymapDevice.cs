@@ -20,6 +20,9 @@ public interface IKeymapDevice
     string DisplayName { get; }
     IReadOnlyList<ButtonDef> Buttons { get; }
 
+    /// <summary>Schematic drawing of the device used by the settings window.</summary>
+    IReadOnlyList<LayoutShape> Layout { get; }
+
     bool IsConnected { get; }
     /// <summary>One-line human readable status for the Devices tab.</summary>
     string Status { get; }

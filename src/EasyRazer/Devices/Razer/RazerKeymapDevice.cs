@@ -29,6 +29,7 @@ public abstract class RazerKeymapDevice : IKeymapDevice
     public abstract string DisplayName { get; }
     public abstract int ProductId { get; }
     public abstract IReadOnlyList<ButtonDef> Buttons { get; }
+    public abstract IReadOnlyList<LayoutShape> Layout { get; }
 
     public bool IsConnected => _link != null;
     public string Status => _status;

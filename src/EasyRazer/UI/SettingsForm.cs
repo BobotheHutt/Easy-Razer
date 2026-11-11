@@ -19,19 +19,8 @@ public sealed class SettingsForm : Form
     private readonly ListBox _games = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly ComboBox _activation = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
     private readonly ComboBox _deviceKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-    private readonly DataGridView _binds = new()
-    {
-        Dock = DockStyle.Fill,
-        ReadOnly = true,
-        AllowUserToAddRows = false,
-        AllowUserToDeleteRows = false,
-        AllowUserToResizeRows = false,
-        RowHeadersVisible = false,
-        SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-        MultiSelect = false,
-        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-        BackgroundColor = SystemColors.Window,
-    };
+    private readonly DeviceLayoutView _layout = new() { Dock = DockStyle.Fill };
+    private readonly BindingPicker _picker = new() { Dock = DockStyle.Fill };
     private readonly GroupBox _gamesBox = new() { Text = "Linked games", Dock = DockStyle.Fill };
 
     // Lighting tab
@@ -68,8 +57,8 @@ public sealed class SettingsForm : Form
         _cfg = ConfigStore.DeepCopy(engine.Config);
 
         Text = "Easy Razer";
-        Size = new Size(820, 600);
-        MinimumSize = new Size(700, 480);
+        Size = new Size(1180, 880);
+        MinimumSize = new Size(1000, 760);
         StartPosition = FormStartPosition.CenterScreen;
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
@@ -144,27 +133,38 @@ public sealed class SettingsForm : Form
         };
 
         foreach (var d in _engine.Devices) _deviceKind.Items.Add(d.DisplayName);
-        _deviceKind.SelectedIndexChanged += (_, _) => FillBinds();
+        _deviceKind.SelectedIndexChanged += (_, _) => ShowDeviceLayout();
 
-        _binds.Columns.Add("button", "Button");
-        _binds.Columns.Add("action", "Does");
-        _binds.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0) EditBind(e.RowIndex); };
-        _binds.KeyDown += (_, e) =>
+        _layout.Describe = DescribeButton;
+        _layout.ButtonClicked += _ => ShowSelectedButton();
+        _picker.ActionChosen += SetSelectedButton;
+
+        var legend = new Label
         {
-            if (e.KeyCode == Keys.Enter && _binds.CurrentRow != null) { e.Handled = true; EditBind(_binds.CurrentRow.Index); }
+            AutoSize = true,
+            Padding = new Padding(16, 6, 0, 0),
+            Text = "Green = set in this profile    Blue = from Default profile    Grey = factory",
+            ForeColor = SystemColors.GrayText,
         };
-        var change = new Button { Text = "Change…", AutoSize = true };
-        var reset = new Button { Text = "Reset button", AutoSize = true };
-        change.Click += (_, _) => { if (_binds.CurrentRow != null) EditBind(_binds.CurrentRow.Index); };
-        reset.Click += (_, _) => ResetBind();
-
         var bindTop = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
         bindTop.Controls.AddRange(new Control[]
         {
-            new Label { Text = "Device:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }, _deviceKind, change, reset,
+            new Label { Text = "Device:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }, _deviceKind, legend,
         });
-        var bindsBox = new GroupBox { Text = "Keybinds (double-click a button to change it)", Dock = DockStyle.Fill };
-        bindsBox.Controls.Add(_binds);
+
+        var editor = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            SplitterWidth = 6,
+            BackColor = Theme.Background,
+        };
+        editor.Panel1.Controls.Add(_layout);
+        editor.Panel2.Controls.Add(_picker);
+        editor.HandleCreated += (_, _) => editor.SplitterDistance = Math.Max(150, editor.Height * 45 / 100);
+
+        var bindsBox = new GroupBox { Text = "Keybinds — click a button on the device, then click what it should do", Dock = DockStyle.Fill };
+        bindsBox.Controls.Add(editor);
         bindsBox.Controls.Add(bindTop);
 
         var activationRow = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
@@ -172,7 +172,7 @@ public sealed class SettingsForm : Form
         activationRow.Controls.Add(_activation);
 
         var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));
+        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
         right.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         right.Controls.Add(_gamesBox, 0, 0);
@@ -213,56 +213,66 @@ public sealed class SettingsForm : Form
         foreach (var g in p.Games) _games.Items.Add(g);
         _activation.Enabled = !p.IsDefault;
         _activation.SelectedIndex = (int)p.Activation;
-        FillBinds();
+        _layout.Invalidate();
+        ShowSelectedButton();
     }
 
-    private void FillBinds()
+    private void ShowDeviceLayout()
     {
-        _binds.Rows.Clear();
+        _layout.Shapes = SelectedDevice?.Layout ?? Array.Empty<LayoutShape>();
+        _layout.SelectedButton = null;
+        _picker.ShowNothingSelected();
+    }
+
+    /// <summary>What a button does in the selected profile, and where that comes from.</summary>
+    private (KeyAction Action, BindingSource Source, KeyAction? SetHere) Resolve(string buttonId)
+    {
         var p = SelectedProfile;
         var d = SelectedDevice;
-        if (p == null || d == null) return;
-        var map = p.BindingsFor(d.KindId);
-        var fallback = p.IsDefault ? null : _cfg.DefaultProfile.BindingsFor(d.KindId);
-        foreach (var b in d.Buttons)
+        var def = d?.Buttons.FirstOrDefault(b => b.Id == buttonId);
+        if (p == null || d == null || def == null) return (new KeyAction(), BindingSource.Factory, null);
+
+        if (p.BindingsFor(d.KindId).TryGetValue(buttonId, out var own) && own.Type != ActionType.Default)
+            return (own, BindingSource.Custom, own);
+        if (!p.IsDefault && _cfg.DefaultProfile.BindingsFor(d.KindId).TryGetValue(buttonId, out var inh) && inh.Type != ActionType.Default)
+            return (inh, BindingSource.Inherited, null);
+        return (def.Factory, BindingSource.Factory, null);
+    }
+
+    private (string, BindingSource) DescribeButton(string buttonId)
+    {
+        var (action, source, _) = Resolve(buttonId);
+        return (KeyLabels.Action(action), source);
+    }
+
+    private void ShowSelectedButton()
+    {
+        var id = _layout.SelectedButton;
+        var def = id == null ? null : SelectedDevice?.Buttons.FirstOrDefault(b => b.Id == id);
+        if (def == null)
         {
-            string text;
-            if (map.TryGetValue(b.Id, out var a) && a.Type != ActionType.Default) text = a.ToString();
-            else if (fallback != null && fallback.TryGetValue(b.Id, out var f) && f.Type != ActionType.Default) text = $"{f}  (from Default)";
-            else text = $"{b.Factory}  (factory)";
-            var row = _binds.Rows.Add(b.Label, text);
-            if (map.ContainsKey(b.Id) && map[b.Id].Type != ActionType.Default)
-                _binds.Rows[row].DefaultCellStyle.Font = new Font(_binds.Font, FontStyle.Bold);
+            _picker.ShowNothingSelected();
+            return;
         }
+        var (action, source, setHere) = Resolve(def.Id);
+        _picker.ShowButton(def.Label, setHere, action, source);
     }
 
-    private void EditBind(int row)
+    private void SetSelectedButton(KeyAction action)
     {
-        var p = SelectedProfile;
-        var d = SelectedDevice;
-        if (p == null || d == null || row >= d.Buttons.Count) return;
-        var button = d.Buttons[row];
+        if (SelectedProfile is not { } p || SelectedDevice is not { } d || _layout.SelectedButton is not { } id) return;
         var map = p.BindingsFor(d.KindId);
-        var current = map.TryGetValue(button.Id, out var a) ? a : new KeyAction();
-        using var dlg = new BindDialog(button.Label, current, button.Factory);
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        if (dlg.Result.Type == ActionType.Default) map.Remove(button.Id);
-        else map[button.Id] = dlg.Result;
+        if (action.Type == ActionType.Default)
+        {
+            if (!map.Remove(id)) return;
+        }
+        else
+        {
+            map[id] = action;
+        }
         MarkDirty();
-        FillBinds();
-        _binds.CurrentCell = _binds.Rows[row].Cells[0];
-    }
-
-    private void ResetBind()
-    {
-        if (SelectedProfile is not { } p || SelectedDevice is not { } d || _binds.CurrentRow is not { } r) return;
-        if (p.BindingsFor(d.KindId).Remove(d.Buttons[r.Index].Id))
-        {
-            MarkDirty();
-            var idx = r.Index;
-            FillBinds();
-            _binds.CurrentCell = _binds.Rows[idx].Cells[0];
-        }
+        _layout.Invalidate();
+        ShowSelectedButton();
     }
 
     private void AddProfile(Profile? copyFrom)
