@@ -55,11 +55,16 @@ public static class KeyLabels
     /// <summary>Short text for an action, as drawn on a device button.</summary>
     public static string Action(KeyAction a)
     {
+        var text = ActionCore(a);
+        return a.TurboRate is { } r && a.SupportsTurbo ? $"Turbo {text} {r}/s" : text;
+    }
+
+    private static string ActionCore(KeyAction a)
+    {
         switch (a.Type)
         {
             case ActionType.Disabled: return "Off";
             case ActionType.Mouse: return Mouse(a.Mouse);
-            case ActionType.AutoClickToggle: return $"Auto {a.Mouse.ToString().ToLowerInvariant()} click {a.ClicksPerSecond}/s (toggle)";
             case ActionType.Key:
                 var main = Enum.TryParse<Keys>(a.Key, out var k) ? KeyLong(k) : a.Key ?? "?";
                 var mods = (a.Ctrl ? "Ctrl+" : "") + (a.Shift ? "Shift+" : "") + (a.Alt ? "Alt+" : "");

@@ -97,6 +97,25 @@ public sealed class ProfileEngine : IDisposable
         Evaluate(ForegroundWatcher.CurrentExe(), force: true);
     }
 
+    /// <summary>
+    /// Hold exclusive access to the devices (e.g. while "Learn keys" runs) so profile switches don't
+    /// write in between. Dispose the result to release.
+    /// </summary>
+    public async Task<IDisposable> LockDevicesAsync()
+    {
+        await _deviceGate.WaitAsync();
+        return new Releaser(_deviceGate);
+    }
+
+    private sealed class Releaser(SemaphoreSlim gate) : IDisposable
+    {
+        private int _done;
+        public void Dispose() { if (Interlocked.Exchange(ref _done, 1) == 0) gate.Release(); }
+    }
+
+    /// <summary>Write the active profile again (e.g. after learning keys).</summary>
+    public void Reapply() => Evaluate(ForegroundWatcher.CurrentExe(), force: true);
+
     public Task ReapplyLightingAsync() => _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
 
     /// <summary>Pick the right profile for the given foreground exe and apply it if it changed.</summary>

@@ -32,12 +32,12 @@ public sealed class BindingPicker : UserControl
     private readonly CheckBox _shift = Toggle("Shift");
     private readonly CheckBox _alt = Toggle("Alt");
     private readonly List<Button> _mouseButtons = new();
-    private readonly Button _autoLeft = Flat("Auto left click");
-    private readonly Button _autoRight = Flat("Auto right click");
+    private readonly Button _autoLeft = Flat("Turbo left click");
+    private readonly Button _autoRight = Flat("Turbo right click");
     private readonly NumericUpDown _autoRate = new()
     {
-        Minimum = 2,
-        Maximum = 50,
+        Minimum = 1,
+        Maximum = 20,
         Value = 15,
         Width = 56,
         BackColor = Theme.Key,
@@ -91,7 +91,7 @@ public sealed class BindingPicker : UserControl
         _autoRight.Click += (_, _) => EmitAutoClick(MouseAction.Right);
         _autoRate.ValueChanged += (_, _) =>
         {
-            if (_loading || _current is not { Type: ActionType.AutoClickToggle } cur) return;
+            if (_loading || _current is not { TurboRate: not null } cur) return;
             EmitAutoClick(cur.Mouse);
         };
         _disable.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Disabled });
@@ -113,7 +113,7 @@ public sealed class BindingPicker : UserControl
         var mouseRow = Row(Dim("Mouse:"));
         mouseRow.Controls.AddRange(_mouseButtons
             .Where(b => (MouseAction)b.Tag! is not (MouseAction.DpiUp or MouseAction.DpiDown)).ToArray<Control>());
-        var autoRow = Row(Dim("Toggle (press once = start, again = stop):"), _autoLeft, _autoRight, _autoRate, Dim("clicks/sec"));
+        var autoRow = Row(Dim("Turbo (clicks repeatedly while held):"), _autoLeft, _autoRight, _autoRate, Dim("clicks/sec"));
         var otherRow = Row(Dim("Other:"));
         otherRow.Controls.AddRange(_mouseButtons
             .Where(b => (MouseAction)b.Tag! is MouseAction.DpiUp or MouseAction.DpiDown).ToArray<Control>());
@@ -204,22 +204,22 @@ public sealed class BindingPicker : UserControl
 
         _keyboard.HeldKeys = Array.Empty<Keys>();
         _keyboard.ChosenKey = effective.Type == ActionType.Key && Enum.TryParse<Keys>(effective.Key, out var k) ? k : null;
-        HighlightMouse(effective.Type == ActionType.Mouse ? effective.Mouse : null);
+        HighlightMouse(effective.Type == ActionType.Mouse && effective.TurboRate == null ? effective.Mouse : null);
         _disable.BackColor = effective.Type == ActionType.Disabled ? ChosenFill : Theme.Key;
-        var auto = effective.Type == ActionType.AutoClickToggle;
+        var auto = effective.Type == ActionType.Mouse && effective.TurboRate != null;
         _autoLeft.BackColor = auto && effective.Mouse == MouseAction.Left ? ChosenFill : Theme.Key;
         _autoRight.BackColor = auto && effective.Mouse == MouseAction.Right ? ChosenFill : Theme.Key;
         _loading = true;
-        if (auto) _autoRate.Value = Math.Clamp(effective.ClicksPerSecond, (int)_autoRate.Minimum, (int)_autoRate.Maximum);
+        if (auto) _autoRate.Value = Math.Clamp(effective.TurboRate!.Value, (int)_autoRate.Minimum, (int)_autoRate.Maximum);
         _loading = false;
         _reset.Enabled = setHere != null;
     }
 
     private void EmitAutoClick(MouseAction button) => Emit(new KeyAction
     {
-        Type = ActionType.AutoClickToggle,
+        Type = ActionType.Mouse,
         Mouse = button,
-        ClicksPerSecond = (int)_autoRate.Value,
+        TurboRate = (int)_autoRate.Value,
     });
 
     private void Emit(KeyAction action)

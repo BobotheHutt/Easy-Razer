@@ -2,6 +2,7 @@ using System.Diagnostics;
 using EasyRazer.Config;
 using EasyRazer.Core;
 using EasyRazer.Devices;
+using EasyRazer.Devices.Razer;
 
 namespace EasyRazer.UI;
 
@@ -41,7 +42,7 @@ public sealed class SettingsForm : Form
     };
     private readonly CheckBox _writeEnabled = new()
     {
-        Text = "Write keybinds to this device (turn on only after the USB capture step is done — see docs/CAPTURE.md)",
+        Text = "Write keybinds to this device",
         AutoSize = true,
         MaximumSize = new Size(560, 0),
     };
@@ -482,13 +483,6 @@ public sealed class SettingsForm : Form
             var dev = _engine.Devices[_devices.SelectedIndices[0]];
             var s = _cfg.DeviceSettingsFor(dev.KindId);
             if (s.KeymapWritesEnabled == _writeEnabled.Checked) return;
-            if (_writeEnabled.Checked && MessageBox.Show(this,
-                    "Only turn this on once the keybind commands for this device have been confirmed with a USB capture.\n\nTurn on?",
-                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-            {
-                _writeEnabled.Checked = false;
-                return;
-            }
             s.KeymapWritesEnabled = _writeEnabled.Checked;
             MarkDirty();
         };
@@ -498,16 +492,37 @@ public sealed class SettingsForm : Form
         {
             Text = "Devices listed here get per-game keybinds stored in their own memory. " +
                    "Every other device (keyboard, mic, soundbar…) just gets the lighting color through OpenRGB.\n\n" +
-                   "While a device is in dry-run mode, the keybind commands are written to the log instead of the device.",
+                   "\"Learn keys\" finds out how a device numbers its buttons: press each one when it lights up. " +
+                   "The Tartarus Pro needs this once before its keybinds work. The Naga Trinity works without it.",
             AutoSize = true,
             MaximumSize = new Size(600, 0),
             Margin = new Padding(0, 12, 0, 8),
         });
         flow.Controls.Add(_writeEnabled);
+        var learn = new Button { Text = "Learn keys…", AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
+        learn.Click += (_, _) => LearnSelectedDevice();
+        flow.Controls.Add(learn);
 
         page.Controls.Add(flow);
         page.Controls.Add(_devices);
         return page;
+    }
+
+    private void LearnSelectedDevice()
+    {
+        if (_devices.SelectedIndices.Count == 0) return;
+        if (_engine.Devices[_devices.SelectedIndices[0]] is not RazerKeymapDevice dev) return;
+        if (!dev.IsConnected)
+        {
+            MessageBox.Show(this, $"{dev.DisplayName} isn't connected (or Synapse is still running).", Text);
+            return;
+        }
+        using var dlg = new LearnDialog(_engine, dev);
+        dlg.ShowDialog(this);
+        // Keep this window's copy of the settings in step with what was just saved.
+        var mine = _cfg.DeviceSettingsFor(dev.KindId);
+        foreach (var (id, slot) in dlg.LearnedSlots) mine.LearnedSlots[id] = slot;
+        RefreshStatus();
     }
 
     private void ShowDevice()

@@ -98,11 +98,11 @@ public sealed class Profile
 
 public sealed class DeviceSettings
 {
-    /// <summary>
-    /// When false (the default) keymap packets are only logged, never sent. Turn on only after the
-    /// keymap protocol for this device has been confirmed with a USB capture (see docs/CAPTURE.md).
-    /// </summary>
-    public bool KeymapWritesEnabled { get; set; }
+    /// <summary>Write keybinds to the device. When off, they're only written to the log.</summary>
+    public bool KeymapWritesEnabled { get; set; } = true;
+
+    /// <summary>Button ids learned with "Learn keys" (button id -> device slot), for devices without a built-in table.</summary>
+    public Dictionary<string, byte> LearnedSlots { get; set; } = new();
 
     /// <summary>Overrides the Razer transaction id if auto-detection picks the wrong one. null = auto.</summary>
     public byte? TransactionId { get; set; }
@@ -116,11 +116,6 @@ public enum ActionType
     Disabled,
     Key,
     Mouse,
-    /// <summary>
-    /// Press once: the device starts clicking <see cref="KeyAction.Mouse"/> continuously.
-    /// Press again: it stops. Runs on the device itself (onboard macro).
-    /// </summary>
-    AutoClickToggle,
 }
 
 public enum MouseAction
@@ -148,8 +143,15 @@ public sealed class KeyAction
 
     public MouseAction Mouse { get; set; }
 
-    /// <summary>Clicks per second for <see cref="ActionType.AutoClickToggle"/>.</summary>
-    public int ClicksPerSecond { get; set; } = 15;
+    /// <summary>
+    /// Turbo: while the button is held, the device repeats the click/key this many times per second
+    /// (1–20). null = off. Stored on the device itself.
+    /// </summary>
+    public int? TurboRate { get; set; }
+
+    public bool SupportsTurbo => Type == ActionType.Key ||
+        (Type == ActionType.Mouse && Mouse is MouseAction.Left or MouseAction.Right or MouseAction.Middle
+            or MouseAction.Back or MouseAction.Forward);
 
     public KeyAction Clone() => (KeyAction)MemberwiseClone();
 

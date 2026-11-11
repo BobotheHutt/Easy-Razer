@@ -5,7 +5,8 @@ namespace EasyRazer.Devices.Razer;
 
 /// <summary>
 /// Razer Tartarus Pro keypad (USB 1532:0244).
-/// Protocol button ids are null until confirmed by a USB capture (docs/CAPTURE.md).
+/// Key slot numbers aren't published, so they're learned on your device with "Learn keys"
+/// (Settings → Devices). It's an analog-switch keypad, so it uses the analog keyboard command form.
 /// Factory actions follow the printed key layout; confirm against the capture of Synapse's "reset to default".
 /// </summary>
 public sealed class TartarusPro : RazerKeymapDevice
@@ -13,6 +14,7 @@ public sealed class TartarusPro : RazerKeymapDevice
     public override string KindId => "tartarus-pro";
     public override string DisplayName => "Tartarus Pro";
     public override int ProductId => 0x0244;
+    public override KeymapStyle Style => KeymapStyle.AnalogKeyboard;
 
     public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
     {

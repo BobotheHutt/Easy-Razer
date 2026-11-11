@@ -5,7 +5,7 @@ namespace EasyRazer.Devices;
 /// <summary>A remappable button on a device.</summary>
 /// <param name="Id">Stable id used in config.json (never change once released).</param>
 /// <param name="Label">What the user sees.</param>
-/// <param name="ProtocolId">Button id the firmware uses. null = not confirmed yet (see docs/CAPTURE.md).</param>
+/// <param name="ProtocolId">Button id the firmware uses. null = learned on the device with "Learn keys".</param>
 /// <param name="Factory">What the button does out of the box. Used for "(default)" bindings.</param>
 public sealed record ButtonDef(string Id, string Label, byte? ProtocolId, KeyAction Factory);
 
