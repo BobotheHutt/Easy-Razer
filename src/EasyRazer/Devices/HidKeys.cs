@@ -20,6 +20,12 @@ public static class HidKeys
 
     public static bool IsSupported(Keys k) => Map.ContainsKey(k);
 
+    private static readonly Dictionary<byte, Keys> Reverse = Map
+        .GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.First().Key);
+
+    /// <summary>The key a HID usage stands for, if it's one we know.</summary>
+    public static bool TryGetKey(byte usage, out Keys key) => Reverse.TryGetValue(usage, out key);
+
     /// <summary>Modifier bitmask as used in HID boot reports: Ctrl=1, Shift=2, Alt=4.</summary>
     public static byte ModifierMask(bool ctrl, bool shift, bool alt) =>
         (byte)((ctrl ? 0x01 : 0) | (shift ? 0x02 : 0) | (alt ? 0x04 : 0));

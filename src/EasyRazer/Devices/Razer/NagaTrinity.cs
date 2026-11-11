@@ -20,7 +20,7 @@ public sealed class NagaTrinity : RazerKeymapDevice
     protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) =>
         RazerLighting.NagaTrinityStatic(tid, r, g, b);
 
-    public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
+    protected override IReadOnlyList<ButtonDef> BuiltInButtons { get; } = new List<ButtonDef>
     {
         new("right", "Right click", 0x02, M(MouseAction.Right)),
         new("middle", "Wheel click", 0x03, M(MouseAction.Middle)),
@@ -40,7 +40,7 @@ public sealed class NagaTrinity : RazerKeymapDevice
         new("side12", "Side 12", 0x4B, K(Keys.Oemplus)),
     };
 
-    public override IReadOnlyList<LayoutShape> Layout { get; } = BuildLayout();
+    protected override IReadOnlyList<LayoutShape> BuiltInLayout { get; } = BuildLayout();
 
     private static List<LayoutShape> BuildLayout()
     {

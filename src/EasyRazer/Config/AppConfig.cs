@@ -117,8 +117,20 @@ public sealed class DeviceSettings
     /// </summary>
     public Dictionary<string, string> LearnedDefaults { get; set; } = new();
 
+    /// <summary>Buttons you added yourself (found with "Learn keys").</summary>
+    public List<ExtraButton> ExtraButtons { get; set; } = new();
+
+    /// <summary>Which button-command form an automatically found keyboard answered to (null = not checked yet).</summary>
+    public string? KeymapStyle { get; set; }
+
     /// <summary>Overrides the Razer transaction id if auto-detection picks the wrong one. null = auto.</summary>
     public byte? TransactionId { get; set; }
+}
+
+public sealed class ExtraButton
+{
+    public string Id { get; set; } = "";
+    public string Label { get; set; } = "";
 }
 
 public enum ActionType

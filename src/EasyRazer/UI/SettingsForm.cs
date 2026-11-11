@@ -644,19 +644,39 @@ public sealed class SettingsForm : Form
                     s.KeymapWritesEnabled = write.Checked;
                     MarkDirty();
                 };
-                var learn = new ModernButton { Text = "Learn keys…", Margin = new Padding(0, 6, 0, 0) };
-                learn.Click += (_, _) => LearnDevice(razer);
-                var learnHint = new TextLabel(dev is TartarusPro
-                        ? "Needed once before the Tartarus keybinds work: press each key as it lights up (about a minute)."
-                        : dev is GenericRazerMouse
-                            ? "Found automatically: right, middle, back and forward are ready to bind. Color is set if the mouse accepts it."
-                            : "Optional. Use it if a button does something different from what you set.", 9.5f, color: Ui.TextDim)
-                    { MaximumSize = new Size(680, 0), Margin = new Padding(0, 10, 0, 0) };
+                var isKeyboard = dev is GenericRazerKeyboard;
+                var learn = new ModernButton { Text = isKeyboard ? "Find keys again" : "Learn keys…", Margin = new Padding(0, 0, 8, 0) };
+                learn.Click += (_, _) => { if (razer is GenericRazerKeyboard kb) _ = FindKeyboardKeysAsync(kb); else LearnDevice(razer); };
+                var learnHint = new TextLabel(dev switch
+                    {
+                        TartarusPro => "Needed once before the Tartarus keybinds work: press each key as it lights up (about a minute).",
+                        GenericRazerMouse => "Found automatically: right, middle, back and forward are ready to bind. Add any other buttons it has below.",
+                        GenericRazerKeyboard => "Found automatically. Its keys are found by reading the keyboard (nothing is changed), and keys it doesn't have are hidden.",
+                        _ => "Learn keys is optional here. Use it if a button does something different from what you set.",
+                    }, 9.5f, color: Ui.TextDim)
+                    { MaximumSize = new Size(680, 0), Margin = new Padding(0, 10, 0, 10) };
                 body.Controls.Add(write);
                 body.Controls.Add(learnHint);
-                body.Controls.Add(learn);
+
+                var buttonsRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(720, 0), BackColor = Ui.Card, Margin = Padding.Empty };
+                buttonsRow.Controls.Add(learn);
+                var extras = _engine.Config.DeviceSettingsFor(dev.KindId).ExtraButtons;
+                if (razer.SupportsExtraButtons)
+                {
+                    var add = new ModernButton { Text = "Add a button", Icon = Ui.IconAdd, Margin = new Padding(0, 0, 8, 0) };
+                    add.Click += (_, _) => AddExtraButton(razer);
+                    buttonsRow.Controls.Add(add);
+                    foreach (var extra in extras)
+                    {
+                        var chip = new Chip(extra.Label) { Margin = new Padding(0, 2, 8, 0) };
+                        var id = extra.Id;
+                        chip.RemoveClicked += (_, _) => RemoveExtraButton(razer, id);
+                        buttonsRow.Controls.Add(chip);
+                    }
+                }
+                body.Controls.Add(buttonsRow);
             }
-            card.Height = dev is RazerKeymapDevice ? 228 : 110;
+            card.Height = dev is RazerKeymapDevice ? 236 : 110;
             card.Controls.Add(body);
             _deviceRows[dev.DisplayName] = (dot, write);
             _deviceCards.Controls.Add(card);
@@ -684,8 +704,81 @@ public sealed class SettingsForm : Form
         var selected = _deviceKind.SelectedIndex;
         _deviceKind.SetItems(_engine.Devices.Select(d => d.DisplayName).ToArray());
         _deviceKind.SelectedIndex = Math.Max(0, selected);
+        foreach (var d in _engine.Devices) SyncDeviceSettings(d.KindId);
         FillDeviceCards();
+        if (SelectedDevice != null) ShowDeviceLayout();
         RefreshStatus();
+    }
+
+    /// <summary>Settings that the device side saves directly (learning, added buttons): copy them into this window's copy.</summary>
+    private void SyncDeviceSettings(string kindId)
+    {
+        var mine = _cfg.DeviceSettingsFor(kindId);
+        var saved = _engine.Config.DeviceSettingsFor(kindId);
+        mine.LearnedSlots = new Dictionary<string, byte>(saved.LearnedSlots);
+        mine.LearnedDefaults = new Dictionary<string, string>(saved.LearnedDefaults);
+        mine.ExtraButtons = saved.ExtraButtons.Select(e => new ExtraButton { Id = e.Id, Label = e.Label }).ToList();
+        mine.KeymapStyle = saved.KeymapStyle;
+    }
+
+    private void AfterDeviceButtonsChanged(RazerKeymapDevice dev)
+    {
+        SyncDeviceSettings(dev.KindId);
+        FillDeviceCards();
+        if (SelectedDevice == dev) ShowDeviceLayout();
+        RefreshStatus();
+    }
+
+    private void AddExtraButton(RazerKeymapDevice dev)
+    {
+        var name = ModernDialog.Prompt(this, "Add a button", $"Give the {dev.DisplayName} button a name, e.g. \"Thumb button\".", "");
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var settings = _engine.Config.DeviceSettingsFor(dev.KindId);
+        var extra = new ExtraButton { Id = "extra-" + Guid.NewGuid().ToString("N")[..8], Label = name.Trim() };
+        settings.ExtraButtons.Add(extra);
+        try { ConfigStore.Save(_engine.Config); } catch (Exception ex) { Log.Error("Saving added button failed", ex); }
+        AfterDeviceButtonsChanged(dev);
+
+        if (!dev.IsConnected)
+        {
+            ModernDialog.Info(this, "Added", $"\"{extra.Label}\" was added. Plug in the {dev.DisplayName} and use Learn keys so Easy Razer can find it.");
+            return;
+        }
+        var button = dev.Buttons.First(b => b.Id == extra.Id);
+        using (var dlg = new LearnDialog(_engine, dev, new[] { button })) dlg.ShowDialog(this);
+        AfterDeviceButtonsChanged(dev);
+    }
+
+    private void RemoveExtraButton(RazerKeymapDevice dev, string id)
+    {
+        var settings = _engine.Config.DeviceSettingsFor(dev.KindId);
+        var extra = settings.ExtraButtons.FirstOrDefault(e => e.Id == id);
+        if (extra == null) return;
+        if (!ModernDialog.Confirm(this, "Remove button", $"Remove \"{extra.Label}\" from the {dev.DisplayName}? Its binds in every profile go too.", "Remove", danger: true)) return;
+        settings.ExtraButtons.Remove(extra);
+        settings.LearnedSlots.Remove(id);
+        settings.LearnedDefaults.Remove(id);
+        foreach (var p in _engine.Config.Profiles) p.BindingsFor(dev.KindId).Remove(id);
+        foreach (var p in _cfg.Profiles) p.BindingsFor(dev.KindId).Remove(id);
+        try { ConfigStore.Save(_engine.Config); } catch (Exception ex) { Log.Error("Saving removed button failed", ex); }
+        AfterDeviceButtonsChanged(dev);
+    }
+
+    private async Task FindKeyboardKeysAsync(GenericRazerKeyboard kb)
+    {
+        if (!kb.IsConnected)
+        {
+            ModernDialog.Info(this, "Not connected", $"{kb.DisplayName} isn't connected, or Synapse is still running.");
+            return;
+        }
+        int found;
+        using (await _engine.LockDevicesAsync())
+            found = await Task.Run(kb.FindKeys);
+        ConfigStore.Save(_engine.Config);
+        AfterDeviceButtonsChanged(kb);
+        ModernDialog.Info(this, "Keys found", found > 0
+            ? $"Found {found} keys on the {kb.DisplayName}."
+            : $"The {kb.DisplayName} didn't answer, so its keys couldn't be found. The log has the details.");
     }
 
     private void LearnDevice(RazerKeymapDevice dev)

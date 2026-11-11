@@ -45,7 +45,7 @@ public sealed class ProfileEngine : IDisposable
     /// you set a bind for them in some profile.
     /// </summary>
     private bool Manages(IKeymapDevice d) =>
-        d is not GenericRazerMouse ||
+        d is not (GenericRazerMouse or GenericRazerKeyboard) ||
         Config.Profiles.Any(p => p.Bindings.TryGetValue(d.KindId, out var map) && map.Values.Any(a => a.Type != ActionType.Default));
 
     /// <summary>Raised on the UI thread when a new device was found automatically.</summary>
@@ -275,7 +275,7 @@ public sealed class ProfileEngine : IDisposable
                 .ToHashSet();
             var (mice, lights) = await Task.Run(() =>
             {
-                var newMice = new List<GenericRazerMouse>();
+                var newMice = new List<RazerKeymapDevice>();
                 var newLights = new List<GenericRazerLight>();
                 try
                 {
@@ -287,6 +287,12 @@ public sealed class ProfileEngine : IDisposable
                             var m = new GenericRazerMouse(found);
                             m.Refresh(Config.DeviceSettingsFor(m.KindId));
                             newMice.Add(m);
+                        }
+                        else if (found.IsKeyboard)
+                        {
+                            var k = new GenericRazerKeyboard(found);
+                            k.Refresh(Config.DeviceSettingsFor(k.KindId));
+                            newMice.Add(k);
                         }
                         else
                         {
@@ -306,8 +312,23 @@ public sealed class ProfileEngine : IDisposable
             {
                 _devices.AddRange(mice);
                 _otherLights.AddRange(lights);
-                DevicesChanged?.Invoke();
             }
+
+            // Keyboards found automatically: find their keys once, just by reading them.
+            var toScan = _devices.OfType<GenericRazerKeyboard>().Where(k => k.IsConnected && !k.KeysFound).ToList();
+            if (toScan.Count > 0)
+            {
+                await Task.Run(() =>
+                {
+                    foreach (var k in toScan)
+                    {
+                        try { k.FindKeys(); }
+                        catch (Exception ex) { Log.Error($"{k.DisplayName}: finding keys failed", ex); }
+                    }
+                });
+                ConfigStore.Save(Config);
+            }
+            if (mice.Count + lights.Count + toScan.Count > 0) DevicesChanged?.Invoke();
         }
         finally
         {

@@ -6,12 +6,13 @@ using static EasyRazer.Devices.LayoutShape;
 namespace EasyRazer.Devices.Razer;
 
 /// <summary>A Razer device found on USB that Easy Razer has no specific module for.</summary>
-public sealed record DiscoveredRazer(int ProductId, string Name, bool IsMouse);
+public sealed record DiscoveredRazer(int ProductId, string Name, bool IsMouse, bool IsKeyboard);
 
 /// <summary>Finds Razer devices that speak the Razer control protocol.</summary>
 public static class RazerDiscovery
 {
     private const uint UsageMouse = 0x0001_0002;
+    private const uint UsageKeyboard = 0x0001_0006;
 
     public static List<DiscoveredRazer> Scan(ISet<int> skipProductIds)
     {
@@ -25,7 +26,9 @@ public static class RazerDiscovery
 
             var name = interfaces.Select(SafeName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? $"Razer device {group.Key:X4}";
             var isMouse = interfaces.Any(i => HasUsage(i, UsageMouse)) && !name.Contains("Keyboard", StringComparison.OrdinalIgnoreCase);
-            found.Add(new DiscoveredRazer(group.Key, name.Trim(), isMouse));
+            // Mice also expose a keyboard interface (for macro keys), so only call it a keyboard if it isn't a mouse.
+            var isKeyboard = !isMouse && interfaces.Any(i => HasUsage(i, UsageKeyboard));
+            found.Add(new DiscoveredRazer(group.Key, name.Trim(), isMouse, isKeyboard));
         }
         return found;
     }
@@ -146,7 +149,7 @@ public sealed class GenericRazerMouse : RazerKeymapDevice
     public override int ProductId { get; }
     public override KeymapStyle Style => KeymapStyle.Mouse;
 
-    public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
+    protected override IReadOnlyList<ButtonDef> BuiltInButtons { get; } = new List<ButtonDef>
     {
         new("right", "Right click", 0x02, M(MouseAction.Right)),
         new("middle", "Wheel click", 0x03, M(MouseAction.Middle)),
@@ -154,7 +157,7 @@ public sealed class GenericRazerMouse : RazerKeymapDevice
         new("forward", "Side forward", 0x05, M(MouseAction.Forward)),
     };
 
-    public override IReadOnlyList<LayoutShape> Layout { get; } = new List<LayoutShape>
+    protected override IReadOnlyList<LayoutShape> BuiltInLayout { get; } = new List<LayoutShape>
     {
         Deco("Top", 0, -9, 44, 6, ShapeKind.Label),
         Deco("", 0, 0, 44, 80, ShapeKind.Outline),
@@ -172,4 +175,118 @@ public sealed class GenericRazerMouse : RazerKeymapDevice
 
     public override bool SetStaticColor(byte r, byte g, byte b) =>
         Link != null && _probe.Apply(Link, DisplayName, r, g, b);
+}
+
+/// <summary>
+/// Any Razer keyboard (or keypad): starts from a full-size keyboard drawing. Its keys are found by
+/// reading the keyboard, not by changing anything: each key normally sends its own letter, so the slot
+/// that sends "A" is the A key. Keys the keyboard doesn't have drop off the drawing.
+/// </summary>
+public sealed class GenericRazerKeyboard : RazerKeymapDevice
+{
+    private readonly LightingProbe _probe = new();
+    private KeymapStyle _style = KeymapStyle.Keyboard;
+
+    public GenericRazerKeyboard(DiscoveredRazer found)
+    {
+        ProductId = found.ProductId;
+        DisplayName = found.Name;
+    }
+
+    public override string KindId => $"razer-{ProductId:x4}";
+    public override string DisplayName { get; }
+    public override int ProductId { get; }
+    public override KeymapStyle Style =>
+        Settings?.KeymapStyle is { } saved && Enum.TryParse<KeymapStyle>(saved, out var s) ? s : _style;
+    public override bool SupportsExtraButtons => false;
+
+    /// <summary>True once its keys have been found (or there was nothing to find).</summary>
+    public bool KeysFound => Settings is { KeymapStyle: not null };
+
+    protected override IReadOnlyList<ButtonDef> BuiltInButtons { get; } = StandardKeyboard.Caps
+        .Select(c => new ButtonDef(KeyId(c.Key), "Key " + EasyRazer.UI.KeyLabels.KeyLong(c.Key), null, K(c.Key)))
+        .ToList();
+
+    protected override IReadOnlyList<LayoutShape> BuiltInLayout { get; } = StandardKeyboard.Caps
+        .Select(c => LayoutShape.Btn(KeyId(c.Key), EasyRazer.UI.KeyLabels.Key(c.Key),
+            c.Bounds.X * 10, c.Bounds.Y * 10, c.Bounds.Width * 10 - 1, c.Bounds.Height * 10 - 1))
+        .ToList();
+
+    private static string KeyId(Keys k) => "key-" + k;
+
+    private bool HasLearned => Settings is { LearnedSlots.Count: > 0 };
+
+    protected override IEnumerable<ButtonDef> FilterButtons(IReadOnlyList<ButtonDef> buttons) =>
+        HasLearned ? buttons.Where(b => Settings!.LearnedSlots.ContainsKey(b.Id)) : buttons;
+
+    protected override IEnumerable<LayoutShape> FilterLayout(IReadOnlyList<LayoutShape> shapes) =>
+        HasLearned ? shapes.Where(s => s.ButtonId == null || Settings!.LearnedSlots.ContainsKey(s.ButtonId)) : shapes;
+
+    protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) => Array.Empty<RazerReport>();
+
+    public override bool SetStaticColor(byte r, byte g, byte b) =>
+        Link != null && _probe.Apply(Link, DisplayName, r, g, b);
+
+    /// <summary>
+    /// Find which slot each key uses by reading the keyboard (nothing is written). Returns how many keys
+    /// were found and stores them in the device settings.
+    /// </summary>
+    public int FindKeys()
+    {
+        if (Link == null || Settings == null) return 0;
+
+        // Which command form does this keyboard answer?
+        Settings.KeymapStyle = null;
+        var answered = false;
+        foreach (var style in new[] { KeymapStyle.Keyboard, KeymapStyle.AnalogKeyboard, KeymapStyle.Mouse })
+        {
+            _style = style;
+            for (byte slot = 1; slot <= 0x20 && !answered; slot++)
+                answered = ReadBlock(ProfileLive, slot) != null;
+            if (answered) break;
+        }
+        if (!answered)
+        {
+            _style = KeymapStyle.Keyboard;
+            Log.Warn($"{DisplayName}: doesn't answer key reads, so its keys can't be found");
+            return 0;
+        }
+        Settings.KeymapStyle = _style.ToString();
+
+        var slotsByKey = new Dictionary<Keys, List<(byte Slot, byte[] Block)>>();
+        foreach (var (slot, block) in ScanSlots(ProfileLive))
+        {
+            Keys? key = null;
+            if (KeyOf(block) is { } usage and not 0 && HidKeys.TryGetKey(usage, out var k)) key = k;
+            else if (block[0] == 0x02 && block[3] == 0 && ModifierKey(block[2]) is { } m) key = m;
+            if (key is not { } found) continue;
+            if (!slotsByKey.TryGetValue(found, out var list)) slotsByKey[found] = list = new();
+            list.Add((slot, block));
+        }
+
+        var learned = 0;
+        foreach (var (key, slots) in slotsByKey)
+        {
+            if (slots.Count != 1) continue; // two keys send the same thing: can't tell them apart
+            var id = KeyId(key);
+            Settings.LearnedSlots[id] = slots[0].Slot;
+            Settings.LearnedDefaults[id] = Convert.ToHexString(slots[0].Block);
+            learned++;
+        }
+        Log.Info($"{DisplayName}: found {learned} key(s) by reading the keyboard ({_style} commands)");
+        return learned;
+    }
+
+    private static Keys? ModifierKey(byte mask) => mask switch
+    {
+        0x01 => Keys.LControlKey,
+        0x02 => Keys.LShiftKey,
+        0x04 => Keys.LMenu,
+        0x08 => Keys.LWin,
+        0x10 => Keys.RControlKey,
+        0x20 => Keys.RShiftKey,
+        0x40 => Keys.RMenu,
+        0x80 => Keys.RWin,
+        _ => null,
+    };
 }

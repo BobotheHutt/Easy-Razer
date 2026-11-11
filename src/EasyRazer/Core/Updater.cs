@@ -20,13 +20,15 @@ public sealed class Updater : IDisposable
     public const string Repo = "BobotheHutt/Easy-Razer";
     private const string SetupAsset = "EasyRazer-Setup.exe";
 
+    public static Version Current { get; } =
+        Assembly.GetExecutingAssembly().GetName().Version is { } v ? new Version(v.Major, v.Minor, Math.Max(0, v.Build)) : new Version(0, 0, 0);
+
+    // Must come after Current: static fields are set up top to bottom, and the client uses the version.
     private static readonly HttpClient Http = CreateClient();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 60_000 };
     private readonly Func<bool> _safeToRestart;
     private bool _busy;
 
-    public static Version Current { get; } =
-        Assembly.GetExecutingAssembly().GetName().Version is { } v ? new Version(v.Major, v.Minor, Math.Max(0, v.Build)) : new Version(0, 0, 0);
 
     /// <summary>True when running from the installer's folder (so updating by installer is possible).</summary>
     public static bool IsInstalled

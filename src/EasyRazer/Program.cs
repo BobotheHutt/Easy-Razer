@@ -20,8 +20,9 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         // Make sure everything created below (engine, tray) posts its updates to this UI thread.
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
-        Application.ThreadException += (_, e) => Log.Error("Unhandled UI exception", e.Exception);
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled exception", e.ExceptionObject as Exception);
+        // Crashes are logged with the full stack trace so they can be tracked down from the log.
+        Application.ThreadException += (_, e) => Log.Error("Unhandled UI exception:\n" + e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled exception:\n" + e.ExceptionObject);
 
         var config = ConfigStore.Load();
         var firstRun = !File.Exists(ConfigStore.FilePath);

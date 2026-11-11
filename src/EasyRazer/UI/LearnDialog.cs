@@ -50,8 +50,12 @@ public sealed class LearnDialog : Form
     private readonly Dictionary<string, byte> _learned = new();
     private bool _busy;
 
-    public LearnDialog(ProfileEngine engine, RazerKeymapDevice device)
+    private readonly IReadOnlyList<ButtonDef> _targets;
+
+    /// <param name="only">Learn just these buttons (e.g. one you just added); null = every button.</param>
+    public LearnDialog(ProfileEngine engine, RazerKeymapDevice device, IReadOnlyList<ButtonDef>? only = null)
     {
+        _targets = only ?? device.Buttons;
         _engine = engine;
         _device = device;
         Text = $"Learn keys — {device.DisplayName}";
@@ -87,7 +91,7 @@ public sealed class LearnDialog : Form
         _recorder.Completed += OnKey;
         _recorder.Cancelled += Close;
         Deactivate += (_, _) => { if (_recorder.IsRecording) _recorder.Stop(); };
-        Activated += (_, _) => { if (_index < _device.Buttons.Count && _batch >= 0 && !_busy) _recorder.Start(); };
+        Activated += (_, _) => { if (_index < _targets.Count && _batch >= 0 && !_busy) _recorder.Start(); };
         FormClosing += (_, e) =>
         {
             if (_busy) { e.Cancel = true; return; } // finishing a device write; try again in a moment
@@ -103,7 +107,10 @@ public sealed class LearnDialog : Form
         _lock = await _engine.LockDevicesAsync();
 
         _original = await Task.Run(() => _device.ScanSlots(RazerKeymapDevice.ProfileLive));
-        _candidates = _original.Keys.OrderBy(k => k).ToList();
+        // Never remap a mouse's left click (slot 1): you need it to click Skip/Cancel.
+        _candidates = _original.Keys
+            .Where(k => !(_device.Style == KeymapStyle.Mouse && k == 0x01))
+            .OrderBy(k => k).ToList();
         if (_candidates.Count == 0)
         {
             _prompt.Text = "The device didn't answer. Close Synapse if it's running, then try again.\n(Details are in the log.)";
@@ -159,28 +166,28 @@ public sealed class LearnDialog : Form
     private void Next()
     {
         _index++;
-        if (_index >= _device.Buttons.Count)
+        if (_index >= _targets.Count)
         {
             _recorder.Stop();
             _view.RecordingButton = null;
             _skip.Enabled = false;
-            _prompt.Text = $"Done — learned {_learned.Count} of {_device.Buttons.Count} buttons. Close this window to save.";
+            _prompt.Text = $"Done — learned {_learned.Count} of {_targets.Count} buttons. Close this window to save.";
             _prompt.ForeColor = Theme.Custom;
             _cancel.Text = "Close";
             return;
         }
-        var button = _device.Buttons[_index];
+        var button = _targets[_index];
         _view.RecordingButton = button.Id;
         _view.SelectedButton = button.Id;
-        _prompt.Text = $"Press  {button.Label}   ({_index + 1} of {_device.Buttons.Count})\nEsc = stop,  Skip = leave this one out";
+        _prompt.Text = $"Press  {button.Label}   ({_index + 1} of {_targets.Count})\nEsc = stop,  Skip = leave this one out";
         _prompt.ForeColor = Theme.Recording;
         _recorder.Start();
     }
 
     private async void OnKey(KeyAction pressed)
     {
-        if (_index < 0 || _index >= _device.Buttons.Count) return;
-        var button = _device.Buttons[_index];
+        if (_index < 0 || _index >= _targets.Count) return;
+        var button = _targets[_index];
 
         if (HidKeys.TryGetUsage(pressed.Key, out var usage) && _usageToSlot.TryGetValue(usage, out var slot))
         {
@@ -196,7 +203,7 @@ public sealed class LearnDialog : Form
         if (batches > 1)
         {
             if (!await WriteBatchAsync((_batch + 1) % batches)) return;
-            _prompt.Text = $"Press  {button.Label}  once more   ({_index + 1} of {_device.Buttons.Count})";
+            _prompt.Text = $"Press  {button.Label}  once more   ({_index + 1} of {_targets.Count})";
         }
         else
         {

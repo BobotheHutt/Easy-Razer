@@ -51,8 +51,45 @@ public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
     public abstract string DisplayName { get; }
     public abstract int ProductId { get; }
     public abstract KeymapStyle Style { get; }
-    public abstract IReadOnlyList<ButtonDef> Buttons { get; }
-    public abstract IReadOnlyList<LayoutShape> Layout { get; }
+    /// <summary>The device's own buttons.</summary>
+    protected abstract IReadOnlyList<ButtonDef> BuiltInButtons { get; }
+    protected abstract IReadOnlyList<LayoutShape> BuiltInLayout { get; }
+
+    /// <summary>Settings this device was last refreshed with (extra buttons, learned slots).</summary>
+    protected DeviceSettings? Settings { get; private set; }
+
+    /// <summary>Built-in buttons plus any you added.</summary>
+    public IReadOnlyList<ButtonDef> Buttons =>
+        FilterButtons(BuiltInButtons).Concat(ExtraDefs()).ToList();
+
+    /// <summary>Drawing: built-in shapes plus an "Added buttons" column for the extras.</summary>
+    public IReadOnlyList<LayoutShape> Layout
+    {
+        get
+        {
+            var shapes = FilterLayout(BuiltInLayout).ToList();
+            var extras = ExtraDefs().ToList();
+            if (extras.Count == 0 || shapes.Count == 0) return shapes;
+
+            var bounds = shapes.Aggregate(shapes[0].Bounds, (acc, s) => RectangleF.Union(acc, s.Bounds));
+            var x = bounds.Right + 14;
+            const float w = 22, h = 11, gap = 3;
+            shapes.Add(LayoutShape.Deco("Added", x, bounds.Top - 9, w * 2 + gap, 6, ShapeKind.Label));
+            for (var i = 0; i < extras.Count; i++)
+                shapes.Add(LayoutShape.Btn(extras[i].Id, extras[i].Label, x + (i % 2) * (w + gap), bounds.Top + (i / 2) * (h + gap), w, h));
+            return shapes;
+        }
+    }
+
+    /// <summary>Lets a device hide built-in buttons it turns out not to have (e.g. a keyboard's unfound keys).</summary>
+    protected virtual IEnumerable<ButtonDef> FilterButtons(IReadOnlyList<ButtonDef> buttons) => buttons;
+    protected virtual IEnumerable<LayoutShape> FilterLayout(IReadOnlyList<LayoutShape> shapes) => shapes;
+
+    private IEnumerable<ButtonDef> ExtraDefs() =>
+        (Settings?.ExtraButtons ?? new List<ExtraButton>()).Select(e => new ButtonDef(e.Id, e.Label, null, new KeyAction()));
+
+    /// <summary>Whether you can add your own buttons to this device (mice and keypads).</summary>
+    public virtual bool SupportsExtraButtons => true;
 
     /// <summary>True when the device has no built-in slot table and needs "Learn keys" first.</summary>
     public bool NeedsLearning(DeviceSettings s) => Buttons.Any(b => SlotFor(b, s) == null);
@@ -62,6 +99,7 @@ public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
 
     public void Refresh(DeviceSettings settings)
     {
+        Settings = settings;
         if (!RazerHidLink.IsPresent(ProductId))
         {
             if (_link != null) Log.Info($"{DisplayName}: unplugged");
@@ -138,7 +176,9 @@ public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
             }
             if (block == null)
             {
-                Log.Warn($"{DisplayName}: can't encode '{action}' for {button.Label}, skipped");
+                // An added button left at "default" with nothing recorded: leave it as it is.
+                if (action.Type != ActionType.Default)
+                    Log.Warn($"{DisplayName}: can't encode '{action}' for {button.Label}, skipped");
                 continue;
             }
 

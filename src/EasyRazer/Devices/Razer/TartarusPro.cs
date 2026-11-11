@@ -19,7 +19,7 @@ public sealed class TartarusPro : RazerKeymapDevice
     protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) =>
         new[] { RazerLighting.ExtendedStatic(tid, RazerLighting.BacklightLed, r, g, b) };
 
-    public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
+    protected override IReadOnlyList<ButtonDef> BuiltInButtons { get; } = new List<ButtonDef>
     {
         new("key01", "Key 01", null, K(Keys.D1)),
         new("key02", "Key 02", null, K(Keys.D2)),
@@ -50,7 +50,7 @@ public sealed class TartarusPro : RazerKeymapDevice
         new("wheel-click", "Scroll click", null, M(MouseAction.Middle)),
     };
 
-    public override IReadOnlyList<LayoutShape> Layout { get; } = BuildLayout();
+    protected override IReadOnlyList<LayoutShape> BuiltInLayout { get; } = BuildLayout();
 
     private static List<LayoutShape> BuildLayout()
     {
