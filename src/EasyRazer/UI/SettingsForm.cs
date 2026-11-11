@@ -379,6 +379,9 @@ public sealed class SettingsForm : Form
     private (string, BindingSource) DescribeButton(string buttonId)
     {
         var (action, source, _) = Resolve(buttonId);
+        // A button you added has no known default action: show its name instead of "Default".
+        if (action.Type == ActionType.Default)
+            return (SelectedDevice?.Buttons.FirstOrDefault(b => b.Id == buttonId)?.Label ?? "", source);
         return (KeyLabels.Action(action), source);
     }
 

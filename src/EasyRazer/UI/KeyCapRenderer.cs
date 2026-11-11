@@ -82,8 +82,11 @@ public static class KeyCapRenderer
             size = max;
             while (size > 7f)
             {
-                var measured = g.MeasureString(text, FontOf(size, style), (int)Math.Max(1, r.Width));
-                if (measured.Width <= r.Width && measured.Height <= r.Height) break;
+                var font = FontOf(size, style);
+                var measured = g.MeasureString(text, font, (int)Math.Max(1, r.Width));
+                // Every word must fit on a line by itself, so words never get split in the middle.
+                var longestWord = text.Split(' ').Max(w => g.MeasureString(w, font).Width);
+                if (measured.Width <= r.Width && measured.Height <= r.Height && longestWord <= r.Width - 3) break;
                 size -= 1f;
             }
             if (FittedSizes.Count > 4000) FittedSizes.Clear(); // resizing the window creates new keys

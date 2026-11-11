@@ -56,7 +56,9 @@ public static class KeyLabels
     public static string Action(KeyAction a)
     {
         var text = ActionCore(a);
-        return a.TurboRate is { } r && a.SupportsTurbo ? $"Turbo {text} {r}/s" : text;
+        if (a.TurboRate is not { } r || !a.SupportsTurbo) return text;
+        var what = a.Type == ActionType.Mouse ? a.Mouse.ToString().ToLowerInvariant() : text;
+        return $"Turbo {what} {r}/s";
     }
 
     private static string ActionCore(KeyAction a)

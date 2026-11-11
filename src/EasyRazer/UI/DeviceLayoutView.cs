@@ -121,7 +121,8 @@ public sealed class DeviceLayoutView : Control
         }
 
         // Small caption at the top, current action big in the middle.
-        var captionH = Math.Min(r.Height * 0.32f, 16);
+        // Small buttons: skip the caption so what the button does stays readable.
+        var captionH = r.Height < 34 ? 0 : Math.Min(r.Height * 0.32f, 16);
         var captionRect = new RectangleF(r.X + 2, r.Y + 1, r.Width - 4, captionH);
         var bodyRect = new RectangleF(r.X + 3, r.Y + captionH, r.Width - 6, r.Height - captionH - 2);
         KeyCapRenderer.FitText(g, s.Caption, captionRect, Theme.TextDim, 11);

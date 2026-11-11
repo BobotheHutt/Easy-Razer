@@ -159,15 +159,15 @@ public sealed class GenericRazerMouse : RazerKeymapDevice
 
     protected override IReadOnlyList<LayoutShape> BuiltInLayout { get; } = new List<LayoutShape>
     {
-        Deco("Top", 0, -9, 44, 6, ShapeKind.Label),
-        Deco("", 0, 0, 44, 80, ShapeKind.Outline),
-        Deco("Left click (fixed)", 2, 2, 15, 34, ShapeKind.Fixed),
-        Btn("right", "Right click", 27, 2, 15, 34),
-        Btn("middle", "Wheel click", 18, 4, 8, 20),
-        Deco("Side buttons", 56, -9, 34, 6, ShapeKind.Label),
-        Deco("", 56, 6, 34, 40, ShapeKind.Outline),
-        Btn("forward", "Forward", 59, 10, 28, 15),
-        Btn("back", "Back", 59, 28, 28, 15),
+        Deco("Top", 0, -9, 60, 6, ShapeKind.Label),
+        Deco("", 0, 0, 60, 84, ShapeKind.Outline),
+        Deco("Left click", 2, 2, 20, 40, ShapeKind.Fixed),
+        Btn("right", "Right click", 38, 2, 20, 40),
+        Btn("middle", "Wheel", 24, 4, 12, 22),
+        Deco("Side buttons", 70, -9, 34, 6, ShapeKind.Label),
+        Deco("", 70, 6, 34, 40, ShapeKind.Outline),
+        Btn("forward", "Forward", 73, 10, 28, 15),
+        Btn("back", "Back", 73, 28, 28, 15),
     };
 
     protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) =>

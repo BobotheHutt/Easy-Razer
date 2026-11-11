@@ -46,21 +46,21 @@ public sealed class NagaTrinity : RazerKeymapDevice
     {
         var shapes = new List<LayoutShape>
         {
-            Deco("Top", 0, -9, 44, 6, ShapeKind.Label),
-            Deco("", 0, 0, 44, 80, ShapeKind.Outline),
-            Deco("Left click (fixed)", 2, 2, 15, 34, ShapeKind.Fixed),
-            Btn("right", "Right click", 27, 2, 15, 34),
-            Btn("middle", "Wheel click", 18, 3, 8, 15),
-            Btn("under-wheel-1", "Front", 18, 20, 8, 7.5f),
-            Btn("under-wheel-2", "Back", 18, 28.5f, 8, 7.5f),
+            Deco("Top", 0, -9, 66, 6, ShapeKind.Label),
+            Deco("", 0, 0, 66, 84, ShapeKind.Outline),
+            Deco("Left click", 2, 2, 19, 44, ShapeKind.Fixed),
+            Btn("right", "Right click", 45, 2, 19, 44),
+            Btn("middle", "Wheel", 22.5f, 2, 21, 13),
+            Btn("under-wheel-1", "Front", 22.5f, 17, 21, 13),
+            Btn("under-wheel-2", "Back", 22.5f, 32, 21, 13),
 
-            Deco("Side plate (12-button)", 56, -9, 46, 6, ShapeKind.Label),
-            Deco("", 56, 6, 46, 60, ShapeKind.Outline),
+            Deco("Side plate (12-button)", 74, -9, 46, 6, ShapeKind.Label),
+            Deco("", 74, 6, 46, 60, ShapeKind.Outline),
         };
         var n = 1;
         for (var row = 0; row < 4; row++)
         for (var col = 0; col < 3; col++, n++)
-            shapes.Add(Btn($"side{n:00}", n.ToString(), 58.5f + col * 14.5f, 9 + row * 14, 13, 12));
+            shapes.Add(Btn($"side{n:00}", n.ToString(), 76.5f + col * 14.5f, 9 + row * 14, 13, 12));
         return shapes;
     }
 }

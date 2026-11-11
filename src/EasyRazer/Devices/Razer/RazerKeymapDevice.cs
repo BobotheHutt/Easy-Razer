@@ -72,11 +72,15 @@ public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
             if (extras.Count == 0 || shapes.Count == 0) return shapes;
 
             var bounds = shapes.Aggregate(shapes[0].Bounds, (acc, s) => RectangleF.Union(acc, s.Bounds));
-            var x = bounds.Right + 14;
-            const float w = 22, h = 11, gap = 3;
-            shapes.Add(LayoutShape.Deco("Added", x, bounds.Top - 9, w * 2 + gap, 6, ShapeKind.Label));
+            // One column beside the drawing, wrapping to a second column only when it runs out of room.
+            var x = bounds.Right + 12;
+            const float w = 24, h = 12, gap = 3;
+            var perColumn = Math.Max(1, (int)((bounds.Height + 9) / (h + gap)));
+            var columns = (extras.Count + perColumn - 1) / perColumn;
+            shapes.Add(LayoutShape.Deco("Added", x, bounds.Top - 9, w * columns + gap * (columns - 1), 6, ShapeKind.Label));
             for (var i = 0; i < extras.Count; i++)
-                shapes.Add(LayoutShape.Btn(extras[i].Id, extras[i].Label, x + (i % 2) * (w + gap), bounds.Top + (i / 2) * (h + gap), w, h));
+                shapes.Add(LayoutShape.Btn(extras[i].Id, extras[i].Label,
+                    x + (i / perColumn) * (w + gap), bounds.Top + (i % perColumn) * (h + gap), w, h));
             return shapes;
         }
     }
