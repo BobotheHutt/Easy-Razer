@@ -104,6 +104,12 @@ public sealed class DeviceSettings
     /// <summary>Button ids learned with "Learn keys" (button id -> device slot), for devices without a built-in table.</summary>
     public Dictionary<string, byte> LearnedSlots { get; set; } = new();
 
+    /// <summary>
+    /// What each learned button did before Easy Razer touched it (hex function block). Used for
+    /// "(default)" so it restores the device's own behavior instead of a guessed factory value.
+    /// </summary>
+    public Dictionary<string, string> LearnedDefaults { get; set; } = new();
+
     /// <summary>Overrides the Razer transaction id if auto-detection picks the wrong one. null = auto.</summary>
     public byte? TransactionId { get; set; }
 }

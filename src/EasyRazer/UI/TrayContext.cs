@@ -117,6 +117,7 @@ public sealed class TrayContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         Log.Info("Easy Razer exiting");
+        _engine.RestoreDefaultForExit();
         _tray.Visible = false;
         _tray.Dispose();
         _engine.Dispose();

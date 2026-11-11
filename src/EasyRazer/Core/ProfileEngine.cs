@@ -131,7 +131,12 @@ public sealed class ProfileEngine : IDisposable
         if (previous != null && previous != target)
             Log.Info($"Profile: {previous.Name} -> {target.Name}" + (foregroundExe != null ? $" ({foregroundExe})" : ""));
 
-        _ = WriteAsync(target, persist: false).ContinueWith(_ => _ui.Post(_ => ProfileApplied?.Invoke(target), null));
+        _ = ApplyAndNotifyAsync(target);
+    }
+
+    private async Task ApplyAndNotifyAsync(Profile target)
+    {
+        if (await WriteAsync(target, persist: false)) ProfileApplied?.Invoke(target);
     }
 
     private Profile Choose(string? exe)
@@ -171,18 +176,30 @@ public sealed class ProfileEngine : IDisposable
         return false;
     }
 
-    private async Task WriteAsync(Profile profile, bool persist)
+    /// <summary>
+    /// Push a profile to the devices. Returns false if it was skipped because a newer profile switch
+    /// came in while waiting (fast alt-tabbing only writes the profile you end up on).
+    /// </summary>
+    private async Task<bool> WriteAsync(Profile profile, bool persist)
     {
-        await _deviceGate.WaitAsync();
+        await _deviceGate.WaitAsync(); // resumes on the UI thread
         try
         {
+            if (!persist && _active != null && !ReferenceEquals(profile, _active)) return false;
+
+            // Work out everything on the UI thread; the background task only talks to hardware.
+            var cfg = Config;
+            var jobs = Devices.Where(d => d.IsConnected)
+                .Select(d => (Device: d, Bindings: EffectiveBindings(profile, d.KindId), Settings: cfg.DeviceSettingsFor(d.KindId)))
+                .ToList();
+
             await Task.Run(() =>
             {
-                foreach (var dev in Devices.Where(d => d.IsConnected))
+                foreach (var (dev, bindings, settings) in jobs)
                 {
                     try
                     {
-                        dev.Apply(EffectiveBindings(profile, dev.KindId), Config.DeviceSettingsFor(dev.KindId), persist);
+                        dev.Apply(bindings, settings, persist);
                     }
                     catch (Exception ex)
                     {
@@ -190,6 +207,7 @@ public sealed class ProfileEngine : IDisposable
                     }
                 }
             });
+            return true;
         }
         finally
         {
@@ -253,6 +271,36 @@ public sealed class ProfileEngine : IDisposable
             await ReapplyLightingAsync();
             Evaluate(ForegroundWatcher.CurrentExe(), force: true);
         }, null);
+    }
+
+    /// <summary>
+    /// On exit, put the desktop (Default) binds back in the devices' live memory so a game profile
+    /// doesn't stay active after the app is closed. Waits at most a couple of seconds.
+    /// </summary>
+    public void RestoreDefaultForExit()
+    {
+        if (_active == null || _active.IsDefault) return;
+        var cfg = Config;
+        var jobs = Devices.Where(d => d.IsConnected)
+            .Select(d => (Device: d, Bindings: EffectiveBindings(cfg.DefaultProfile, d.KindId), Settings: cfg.DeviceSettingsFor(d.KindId)))
+            .ToList();
+        if (!_deviceGate.Wait(2000)) return;
+        try
+        {
+            var work = Task.Run(() =>
+            {
+                foreach (var (dev, bindings, settings) in jobs)
+                {
+                    try { dev.Apply(bindings, settings, persist: false); }
+                    catch (Exception ex) { Log.Error($"{dev.DisplayName}: restoring desktop binds on exit failed", ex); }
+                }
+            });
+            work.Wait(3000);
+        }
+        finally
+        {
+            _deviceGate.Release();
+        }
     }
 
     private void RaiseStatus() => _ui.Post(_ => StatusChanged?.Invoke(), null);

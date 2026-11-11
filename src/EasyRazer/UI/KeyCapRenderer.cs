@@ -50,28 +50,46 @@ public static class KeyCapRenderer
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
     }
 
+    // Fonts and fitted sizes are cached: the keyboard repaints ~110 keys on every hover change, and
+    // creating/measuring fonts from scratch each time makes hovering laggy.
+    private static readonly Dictionary<(float, FontStyle), Font> Fonts = new();
+    private static readonly Dictionary<(string, int, int, float, FontStyle), float> FittedSizes = new();
+    private static readonly StringFormat Centered = new()
+    {
+        Alignment = StringAlignment.Center,
+        LineAlignment = StringAlignment.Center,
+        Trimming = StringTrimming.EllipsisCharacter,
+    };
+
+    private static Font FontOf(float size, FontStyle style)
+    {
+        if (!Fonts.TryGetValue((size, style), out var f))
+        {
+            f = new Font("Segoe UI", size, style, GraphicsUnit.Pixel);
+            Fonts[(size, style)] = f;
+        }
+        return f;
+    }
+
     /// <summary>Draw text centered in a rectangle, shrinking the font until it fits.</summary>
     public static void FitText(Graphics g, string text, RectangleF r, Color color, float maxSize, FontStyle style = FontStyle.Regular)
     {
         if (string.IsNullOrEmpty(text) || r.Width < 4 || r.Height < 4) return;
-        using var fmt = new StringFormat
+        var max = MathF.Round(Math.Max(6f, maxSize));
+        var key = (text, (int)r.Width, (int)r.Height, max, style);
+        if (!FittedSizes.TryGetValue(key, out var size))
         {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center,
-            Trimming = StringTrimming.EllipsisCharacter,
-        };
-        var size = Math.Max(6f, maxSize);
-        while (true)
-        {
-            using var font = new Font("Segoe UI", size, style, GraphicsUnit.Pixel);
-            var measured = g.MeasureString(text, font, (int)Math.Max(1, r.Width));
-            if ((measured.Width <= r.Width && measured.Height <= r.Height) || size <= 7f)
+            size = max;
+            while (size > 7f)
             {
-                using var brush = new SolidBrush(color);
-                g.DrawString(text, font, brush, r, fmt);
-                return;
+                var measured = g.MeasureString(text, FontOf(size, style), (int)Math.Max(1, r.Width));
+                if (measured.Width <= r.Width && measured.Height <= r.Height) break;
+                size -= 1f;
             }
-            size -= 1f;
+            if (FittedSizes.Count > 4000) FittedSizes.Clear(); // resizing the window creates new keys
+            FittedSizes[key] = size;
         }
+        using var brush = new SolidBrush(color);
+        g.DrawString(text, FontOf(size, style), brush, r, Centered);
     }
 }

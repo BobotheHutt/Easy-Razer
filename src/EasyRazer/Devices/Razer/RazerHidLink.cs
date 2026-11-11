@@ -16,6 +16,7 @@ public sealed class RazerHidLink : IDisposable
 
     private readonly HidDevice _device;
     private readonly object _io = new();
+    private HidStream? _stream;
 
     public byte TransactionId { get; }
     public string Firmware { get; }
@@ -67,10 +68,36 @@ public sealed class RazerHidLink : IDisposable
     public static bool IsPresent(int productId) =>
         DeviceList.Local.GetHidDevices(RazerVendorId, productId).Any();
 
-    /// <summary>Send a command and return the device's answer (null if it never answered).</summary>
+    /// <summary>
+    /// Send a command and return the device's answer (null if it never answered).
+    /// The connection stays open between commands; if it has gone stale (device replugged), it's
+    /// reopened once and the command retried.
+    /// </summary>
     public RazerReport? Send(RazerReport report)
     {
-        lock (_io) return Exchange(_device, report);
+        lock (_io)
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    _stream ??= OpenStream(_device);
+                    if (_stream == null) return null;
+                    return Exchange(_stream, report);
+                }
+                catch (Exception ex) when (attempt == 0)
+                {
+                    Log.Warn($"Razer {_device.ProductID:X4}: connection error ({ex.Message}), reopening");
+                    CloseStream();
+                }
+                catch
+                {
+                    CloseStream();
+                    throw;
+                }
+            }
+            return null;
+        }
     }
 
     private static bool SupportsRazerReports(HidDevice d)
@@ -79,34 +106,48 @@ public sealed class RazerHidLink : IDisposable
         catch { return false; }
     }
 
-    private static RazerReport? Exchange(HidDevice dev, RazerReport report)
+    private static HidStream? OpenStream(HidDevice dev)
     {
         if (!dev.TryOpen(out HidStream stream)) return null;
-        using (stream)
+        stream.ReadTimeout = 500;
+        stream.WriteTimeout = 500;
+        return stream;
+    }
+
+    /// <summary>One-off exchange on a device we aren't holding open (used while probing).</summary>
+    private static RazerReport? Exchange(HidDevice dev, RazerReport report)
+    {
+        using var stream = OpenStream(dev);
+        return stream == null ? null : Exchange(stream, report);
+    }
+
+    private static RazerReport? Exchange(HidStream stream, RazerReport report)
+    {
+        // Feature report id 0 + 90 payload bytes.
+        var outBuf = new byte[RazerReport.Length + 1];
+        report.ToBytes().CopyTo(outBuf, 1);
+        stream.SetFeature(outBuf);
+
+        // The device needs a moment; it answers "busy" (0x01) until it's done (longer for onboard-memory writes).
+        var inBuf = new byte[RazerReport.Length + 1];
+        for (var attempt = 0; attempt < 40; attempt++)
         {
-            stream.ReadTimeout = 500;
-            stream.WriteTimeout = 500;
-
-            // Feature report id 0 + 90 payload bytes.
-            var outBuf = new byte[RazerReport.Length + 1];
-            report.ToBytes().CopyTo(outBuf, 1);
-            stream.SetFeature(outBuf);
-
-            // The device needs a moment; it answers "busy" (0x01) until it's done.
-            for (var attempt = 0; attempt < 10; attempt++)
-            {
-                Thread.Sleep(attempt == 0 ? 2 : 10);
-                var inBuf = new byte[RazerReport.Length + 1];
-                stream.GetFeature(inBuf);
-                var reply = RazerReport.Parse(inBuf.AsSpan(1));
-                if (reply.Status != 0x01) return reply;
-            }
-            return null;
+            Thread.Sleep(attempt == 0 ? 1 : 5);
+            stream.GetFeature(inBuf);
+            var reply = RazerReport.Parse(inBuf.AsSpan(1));
+            if (reply.Status != 0x01) return reply;
         }
+        return null;
+    }
+
+    private void CloseStream()
+    {
+        try { _stream?.Dispose(); } catch { }
+        _stream = null;
     }
 
     public void Dispose()
     {
-        // Streams are opened per exchange, nothing held open.
+        lock (_io) CloseStream();
     }
 }

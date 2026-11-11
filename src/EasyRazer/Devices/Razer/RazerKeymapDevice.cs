@@ -42,6 +42,8 @@ public abstract class RazerKeymapDevice : IKeymapDevice
     private RazerHidLink? _link;
     private string _status = "Not detected";
     private bool _verified;
+    // Last block written per (profile, slot), so unchanged buttons aren't sent again on every switch.
+    private readonly Dictionary<(byte Profile, byte Slot), byte[]> _written = new();
     // Analog keyboards: the actuation/release bytes of each key, read from the device so we never change them.
     private readonly Dictionary<byte, (byte Actuation, byte Release)> _analogPoints = new();
 
@@ -63,9 +65,11 @@ public abstract class RazerKeymapDevice : IKeymapDevice
         if (!RazerHidLink.IsPresent(ProductId))
         {
             if (_link != null) Log.Info($"{DisplayName}: unplugged");
+            _link?.Dispose();
             _link = null;
             _verified = false;
             _analogPoints.Clear();
+            _written.Clear();
             _status = "Not detected";
             return;
         }
@@ -111,13 +115,27 @@ public abstract class RazerKeymapDevice : IKeymapDevice
 
         var profile = persist ? ProfilePersistent : ProfileLive;
         var written = 0;
+        var unchanged = 0;
 
         foreach (var button in Buttons)
         {
             if (SlotFor(button, settings) is not { } slot) continue;
 
-            var action = bindings.TryGetValue(button.Id, out var a) && a.Type != ActionType.Default ? a : button.Factory;
-            var block = Encode(action);
+            byte[]? block;
+            KeyAction action;
+            if (bindings.TryGetValue(button.Id, out var a) && a.Type != ActionType.Default)
+            {
+                action = a;
+                block = Encode(a);
+            }
+            else
+            {
+                action = button.Factory;
+                // Prefer what the device itself had (recorded by "Learn keys") over the built-in guess.
+                block = settings.LearnedDefaults.TryGetValue(button.Id, out var hex) && TryHex(hex, out var learned)
+                    ? learned
+                    : Encode(button.Factory);
+            }
             if (block == null)
             {
                 Log.Warn($"{DisplayName}: can't encode '{action}' for {button.Label}, skipped");
@@ -127,6 +145,17 @@ public abstract class RazerKeymapDevice : IKeymapDevice
             if (!settings.KeymapWritesEnabled)
             {
                 Log.Info($"{DisplayName} [writing off] {button.Label} -> {action}: {Convert.ToHexString(block)}");
+                continue;
+            }
+
+            // For onboard memory, look at what's stored before writing, so starting the app every day
+            // doesn't rewrite flash that already holds the right thing.
+            if (persist && _verified && !_written.ContainsKey((profile, slot)) && ReadBlock(profile, slot) is { } stored)
+                _written[(profile, slot)] = stored;
+
+            if (_verified && _written.TryGetValue((profile, slot), out var last) && last.AsSpan().SequenceEqual(block))
+            {
+                unchanged++;
                 continue;
             }
 
@@ -156,7 +185,9 @@ public abstract class RazerKeymapDevice : IKeymapDevice
 
         if (settings.KeymapWritesEnabled)
         {
-            Log.Info($"{DisplayName}: wrote {written} button(s) to {(persist ? "onboard memory" : "live memory")}");
+            if (written > 0)
+                Log.Info($"{DisplayName}: wrote {written} button(s) to {(persist ? "onboard memory" : "live memory")}" +
+                         (unchanged > 0 ? $", {unchanged} already up to date" : ""));
             UpdateStatus(settings);
         }
     }
@@ -209,7 +240,15 @@ public abstract class RazerKeymapDevice : IKeymapDevice
         }
 
         var reply = _link.Send(report);
-        if (reply is { Status: 0x02 }) return true;
+        if (reply is { Status: 0x02 })
+        {
+            _written[(profile, slot)] = block.ToArray();
+            // Writing the active onboard profile also changes the live layer, so forget what we
+            // thought the live layer held for this slot.
+            if (profile != ProfileLive) _written.Remove((ProfileLive, slot));
+            return true;
+        }
+        _written.Remove((profile, slot));
         problem = $"device answered {reply?.Status.ToString("X2") ?? "nothing"} to {report.Describe()}";
         return false;
     }
@@ -272,6 +311,20 @@ public abstract class RazerKeymapDevice : IKeymapDevice
 
             default:
                 return null;
+        }
+    }
+
+    private static bool TryHex(string hex, out byte[] block)
+    {
+        block = Array.Empty<byte>();
+        try
+        {
+            block = Convert.FromHexString(hex);
+            return block.Length == 7;
+        }
+        catch (FormatException)
+        {
+            return false;
         }
     }
 

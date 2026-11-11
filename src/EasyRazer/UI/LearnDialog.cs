@@ -226,7 +226,12 @@ public sealed class LearnDialog : Form
         if (save)
         {
             var s = _engine.Config.DeviceSettingsFor(_device.KindId);
-            foreach (var (id, slot) in _learned) s.LearnedSlots[id] = slot;
+            foreach (var (id, slot) in _learned)
+            {
+                s.LearnedSlots[id] = slot;
+                if (_original.TryGetValue(slot, out var before))
+                    s.LearnedDefaults[id] = Convert.ToHexString(before);
+            }
             ConfigStore.Save(_engine.Config);
             Log.Info($"{_device.DisplayName}: saved {_learned.Count} learned button(s)");
             LearnedSlots = new Dictionary<string, byte>(_learned);

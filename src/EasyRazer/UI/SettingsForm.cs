@@ -521,7 +521,9 @@ public sealed class SettingsForm : Form
         dlg.ShowDialog(this);
         // Keep this window's copy of the settings in step with what was just saved.
         var mine = _cfg.DeviceSettingsFor(dev.KindId);
-        foreach (var (id, slot) in dlg.LearnedSlots) mine.LearnedSlots[id] = slot;
+        var saved = _engine.Config.DeviceSettingsFor(dev.KindId);
+        mine.LearnedSlots = new Dictionary<string, byte>(saved.LearnedSlots);
+        mine.LearnedDefaults = new Dictionary<string, string>(saved.LearnedDefaults);
         RefreshStatus();
     }
 
