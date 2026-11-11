@@ -97,7 +97,12 @@ public sealed class SettingsForm : Form
         ShowPage(int.TryParse(Environment.GetEnvironmentVariable("EASYRAZER_PAGE"), out var startPage) ? Math.Clamp(startPage, 0, 3) : 0);
 
         FormClosing += OnClosing;
-        FormClosed += (_, _) => _recorder.Dispose();
+        _engine.DevicesChanged += OnDevicesChanged;
+        FormClosed += (_, _) =>
+        {
+            _engine.DevicesChanged -= OnDevicesChanged;
+            _recorder.Dispose();
+        };
         // Never keep listening to the keyboard once you leave this window.
         Deactivate += (_, _) => _recorder.Cancel();
         KeyPreview = true;
@@ -608,6 +613,19 @@ public sealed class SettingsForm : Form
 
     private Control BuildDevicesPage()
     {
+        FillDeviceCards();
+        Stretch(_deviceCards);
+        var page = new Panel { BackColor = Ui.Window };
+        page.Controls.Add(_deviceCards);
+        page.Controls.Add(PageHeader("Devices", "Close Synapse and Razer services first, or devices will show as not answering. Other Razer devices are found automatically."));
+        return page;
+    }
+
+    private void FillDeviceCards()
+    {
+        _deviceCards.SuspendLayout();
+        _deviceCards.Controls.Clear();
+        _deviceRows.Clear();
         foreach (var dev in _engine.Devices)
         {
             var dot = new StatusDot { Margin = new Padding(0, 2, 0, 12) };
@@ -630,7 +648,9 @@ public sealed class SettingsForm : Form
                 learn.Click += (_, _) => LearnDevice(razer);
                 var learnHint = new TextLabel(dev is TartarusPro
                         ? "Needed once before the Tartarus keybinds work: press each key as it lights up (about a minute)."
-                        : "Optional. Use it if a button does something different from what you set.", 9.5f, color: Ui.TextDim)
+                        : dev is GenericRazerMouse
+                            ? "Found automatically: right, middle, back and forward are ready to bind. Color is set if the mouse accepts it."
+                            : "Optional. Use it if a button does something different from what you set.", 9.5f, color: Ui.TextDim)
                     { MaximumSize = new Size(680, 0), Margin = new Padding(0, 10, 0, 0) };
                 body.Controls.Add(write);
                 body.Controls.Add(learnHint);
@@ -647,16 +667,25 @@ public sealed class SettingsForm : Form
         {
             var dot = new StatusDot();
             var card = FixedCard(light.DisplayName, 120);
-            card.Controls.Add(Stack(dot, new TextLabel("Color only.", 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 6, 0, 0) }));
+            var note = light is GenericRazerLight ? "Found automatically. Color only, if the device accepts Razer's color commands." : "Color only.";
+            card.Controls.Add(Stack(dot, new TextLabel(note, 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 6, 0, 0) }));
             _deviceRows[light.DisplayName] = (dot, null);
             _deviceCards.Controls.Add(card);
         }
+        var w = Math.Max(560, _deviceCards.ClientSize.Width - 2);
+        foreach (Control c in _deviceCards.Controls) c.Width = w;
+        _deviceCards.ResumeLayout();
+    }
 
-        Stretch(_deviceCards);
-        var page = new Panel { BackColor = Ui.Window };
-        page.Controls.Add(_deviceCards);
-        page.Controls.Add(PageHeader("Devices", "Close Synapse and Razer services first, or devices will show as not answering."));
-        return page;
+    /// <summary>A device was found automatically: add it to the device picker and the Devices page.</summary>
+    private void OnDevicesChanged()
+    {
+        if (IsDisposed) return;
+        var selected = _deviceKind.SelectedIndex;
+        _deviceKind.SetItems(_engine.Devices.Select(d => d.DisplayName).ToArray());
+        _deviceKind.SelectedIndex = Math.Max(0, selected);
+        FillDeviceCards();
+        RefreshStatus();
     }
 
     private void LearnDevice(RazerKeymapDevice dev)

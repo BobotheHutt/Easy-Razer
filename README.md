@@ -32,6 +32,7 @@ the game is running**. Binds not set in a game profile fall back to the Default 
 | Built-in lighting (Naga, Tartarus, Cynosa) | Done, needs testing |
 | Naga Trinity keybinds | Done, using the Naga Pro button table (assumed the same) |
 | Tartarus Pro keybinds | Done; run **Settings → Devices → Learn keys** once first |
+| Other Razer devices | Found automatically: color for anything that accepts Razer's color commands; mice also get right/middle/back/forward binds (left untouched until you set a bind) |
 | Import profiles from Synapse | Planned, needs a sample exported profile |
 
 Button-binding commands come from public reverse-engineering work, not guesswork:

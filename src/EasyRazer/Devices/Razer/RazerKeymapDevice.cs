@@ -197,7 +197,10 @@ public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
     /// <summary>The command(s) that set this device to one static color.</summary>
     protected abstract IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b);
 
-    public bool SetStaticColor(byte r, byte g, byte b)
+    /// <summary>The open connection, for subclasses that talk to the device themselves.</summary>
+    protected RazerHidLink? Link => _link;
+
+    public virtual bool SetStaticColor(byte r, byte g, byte b)
     {
         if (_link == null) return false;
         foreach (var report in StaticColorReports(_link.TransactionId, r, g, b))

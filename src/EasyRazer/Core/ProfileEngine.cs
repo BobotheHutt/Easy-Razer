@@ -29,11 +29,27 @@ public sealed class ProfileEngine : IDisposable
     private Profile? _lastRunningProfile; // most recent "while running" profile that was focused
 
     public AppConfig Config { get; private set; }
-    public IReadOnlyList<IKeymapDevice> Devices { get; } = new List<IKeymapDevice> { new TartarusPro(), new NagaTrinity() };
+    private readonly List<IKeymapDevice> _devices = new() { new TartarusPro(), new NagaTrinity() };
     private readonly CynosaChroma _cynosa = new();
+    private readonly List<GenericRazerLight> _otherLights = new();
+
+    /// <summary>Devices with keybinds: the built-in ones plus any Razer mouse found automatically.</summary>
+    public IReadOnlyList<IKeymapDevice> Devices => _devices;
 
     /// <summary>Devices whose color Easy Razer sets itself.</summary>
-    public IEnumerable<ILightingDevice> LightingDevices => Devices.OfType<ILightingDevice>().Append(_cynosa);
+    public IEnumerable<ILightingDevice> LightingDevices =>
+        _devices.OfType<ILightingDevice>().Append(_cynosa).Concat(_otherLights);
+
+    /// <summary>
+    /// Automatically found mice are left exactly as they are (they may hold binds from Synapse) until
+    /// you set a bind for them in some profile.
+    /// </summary>
+    private bool Manages(IKeymapDevice d) =>
+        d is not GenericRazerMouse ||
+        Config.Profiles.Any(p => p.Bindings.TryGetValue(d.KindId, out var map) && map.Values.Any(a => a.Type != ActionType.Default));
+
+    /// <summary>Raised on the UI thread when a new device was found automatically.</summary>
+    public event Action? DevicesChanged;
     public LightingService Lighting => _lighting;
     public Profile? ActiveProfile => _active;
 
@@ -193,7 +209,7 @@ public sealed class ProfileEngine : IDisposable
 
             // Work out everything on the UI thread; the background task only talks to hardware.
             var cfg = Config;
-            var jobs = Devices.Where(d => d.IsConnected)
+            var jobs = Devices.Where(d => d.IsConnected && Manages(d))
                 .Select(d => (Device: d, Bindings: EffectiveBindings(profile, d.KindId), Settings: cfg.DeviceSettingsFor(d.KindId)))
                 .ToList();
 
@@ -245,7 +261,53 @@ public sealed class ProfileEngine : IDisposable
                 }
                 try { _cynosa.Refresh(); }
                 catch (Exception ex) { Log.Error($"{_cynosa.DisplayName}: detection failed", ex); }
+                foreach (var light in _otherLights)
+                {
+                    try { light.Refresh(); }
+                    catch (Exception ex) { Log.Error($"{light.DisplayName}: detection failed", ex); }
+                }
             });
+
+            // Any other Razer device: set it up for basic use (color; buttons for mice).
+            var known = _devices.OfType<RazerKeymapDevice>().Select(d => d.ProductId)
+                .Append(0x022A) // Cynosa Chroma
+                .Concat(_otherLights.Select(l => l.ProductId))
+                .ToHashSet();
+            var (mice, lights) = await Task.Run(() =>
+            {
+                var newMice = new List<GenericRazerMouse>();
+                var newLights = new List<GenericRazerLight>();
+                try
+                {
+                    foreach (var found in RazerDiscovery.Scan(known))
+                    {
+                        Log.Info($"Found {found.Name} ({found.ProductId:X4}{(found.IsMouse ? ", mouse" : "")})");
+                        if (found.IsMouse)
+                        {
+                            var m = new GenericRazerMouse(found);
+                            m.Refresh(Config.DeviceSettingsFor(m.KindId));
+                            newMice.Add(m);
+                        }
+                        else
+                        {
+                            var l = new GenericRazerLight(found);
+                            l.Refresh();
+                            newLights.Add(l);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Looking for other Razer devices failed", ex);
+                }
+                return (newMice, newLights);
+            });
+            if (mice.Count + lights.Count > 0)
+            {
+                _devices.AddRange(mice);
+                _otherLights.AddRange(lights);
+                DevicesChanged?.Invoke();
+            }
         }
         finally
         {
@@ -289,7 +351,7 @@ public sealed class ProfileEngine : IDisposable
     {
         if (_active == null || _active.IsDefault) return;
         var cfg = Config;
-        var jobs = Devices.Where(d => d.IsConnected)
+        var jobs = Devices.Where(d => d.IsConnected && Manages(d))
             .Select(d => (Device: d, Bindings: EffectiveBindings(cfg.DefaultProfile, d.KindId), Settings: cfg.DeviceSettingsFor(d.KindId)))
             .ToList();
         if (!_deviceGate.Wait(2000)) return;
