@@ -11,6 +11,7 @@
     <RootNamespace>EasyRazer</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Version>0.1.0</Version>
+    <ApplicationIcon>..\..\assets\EasyRazer.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

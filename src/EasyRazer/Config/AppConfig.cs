@@ -19,6 +19,9 @@ public sealed class AppConfig
 
     public bool PauseSwitching { get; set; }
 
+    /// <summary>Download and install new versions automatically (installed version only).</summary>
+    public bool AutoUpdate { get; set; } = true;
+
     /// <summary>When recording a bind, Escape cancels and can never be bound.</summary>
     public bool EscapeCancels { get; set; } = true;
 

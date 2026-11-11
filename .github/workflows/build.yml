@@ -19,6 +19,12 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # Every build gets its own version: 0.1.<build number>. The app compares this to the newest
+      # release to decide whether to update.
+      - name: Set version
+        shell: bash
+        run: echo "VERSION=0.1.${{ github.run_number }}" >> "$GITHUB_ENV"
+
       - name: Publish single-file exe
         run: >
           dotnet publish src/EasyRazer/EasyRazer.csproj -c Release -r win-x64
@@ -27,22 +33,42 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
           -p:PublishReadyToRun=true
+          -p:Version=${{ env.VERSION }}
           -o publish
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          # Works with Inno Setup 6 or 7, wherever it landed.
+          $iscc = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { Write-Error "ISCC.exe not found"; exit 1 }
+          Write-Host "Using $iscc"
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceExe=..\publish\EasyRazer.exe" installer\EasyRazer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: EasyRazer
-          path: publish/EasyRazer.exe
+          name: EasyRazer-${{ env.VERSION }}
+          path: |
+            publish/EasyRazer-Setup.exe
+            publish/EasyRazer.exe
 
-      # Every push to main replaces the "latest" release, so the newest exe is always one click away.
-      - name: Update "latest" release
+      # Each push to main becomes a release; the newest one is what the app's updater installs.
+      - name: Publish release
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest publish/EasyRazer.exe \
-            --prerelease \
-            --title "Latest build" \
-            --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows may show a SmartScreen warning because the exe isn't code-signed: click 'More info' then 'Run anyway'."
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true   # old rolling release, no longer used
+          gh release create "v$VERSION" publish/EasyRazer-Setup.exe publish/EasyRazer.exe \
+            --title "Easy Razer $VERSION" \
+            --latest \
+            --notes "Built from commit ${GITHUB_SHA::7}.
+
+          **Install:** download \`EasyRazer-Setup.exe\` and run it. Installed copies update themselves.
+          **Portable:** \`EasyRazer.exe\` runs on its own but doesn't auto-update.
+
+          Windows may show a SmartScreen warning because the files aren't code-signed: click *More info*, then *Run anyway*."

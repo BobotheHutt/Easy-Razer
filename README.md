@@ -48,9 +48,11 @@ Do this in order:
    - Export your Synapse profiles (profile list → `…` → Export) and screenshot your binds and linked games.
    - Set the color on the mic, soundbar and control pod. They keep what's saved on them.
 2. **Uninstall Synapse** (and Razer Central / Razer services). They fight over the devices.
-3. **Download Easy Razer**: go to [Releases](../../releases), open **Latest build**, download `EasyRazer.exe`,
-   and put it somewhere permanent (e.g. `C:\Tools\EasyRazer`). The first run shows a SmartScreen warning
-   because it isn't code-signed: **More info → Run anyway**.
+3. **Install Easy Razer**: from the newest [release](../../releases/latest), download `EasyRazer-Setup.exe` and run it.
+   No admin rights needed; it adds a Start menu entry, can start with Windows, and **updates itself**
+   (it waits until you're on the desktop, never mid-game). Windows shows a SmartScreen warning because
+   it isn't code-signed: **More info → Run anyway**.
+   (`EasyRazer.exe` in the same release is a portable copy that runs without installing but doesn't auto-update.)
 4. In Easy Razer's settings:
    - **Lighting**: pick your color, Save.
    - **Profiles**: add a profile per game, link the game (start it, then "Add running game…"), set binds, Save.

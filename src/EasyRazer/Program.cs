@@ -28,6 +28,7 @@ internal static class Program
         if (firstRun) ConfigStore.Save(config);
 
         var openSettings = firstRun || !args.Contains("--tray", StringComparer.OrdinalIgnoreCase);
-        Application.Run(new TrayContext(config, openSettings));
+        var justUpdated = args.Contains("--updated", StringComparer.OrdinalIgnoreCase);
+        Application.Run(new TrayContext(config, openSettings, justUpdated));
     }
 }

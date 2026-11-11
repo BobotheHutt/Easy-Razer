@@ -21,6 +21,7 @@ public sealed class SettingsForm : Form
     };
 
     private readonly ProfileEngine _engine;
+    private readonly Updater _updater;
     private AppConfig _cfg;
     private bool _dirty;
 
@@ -61,14 +62,19 @@ public sealed class SettingsForm : Form
 
     // Settings page
     private readonly ToggleSwitch _autostart = new() { Text = "Start Easy Razer when I sign in to Windows" };
+    private readonly ToggleSwitch _autoUpdate = new() { Text = "Install updates automatically" };
+    private readonly Label _updateStatus = new() { AutoSize = true, ForeColor = Ui.TextDim, Font = Ui.Font(9.5f), UseMnemonic = false, Margin = new Padding(52, 0, 0, 10) };
 
     private readonly KeyRecorder _recorder = new();
 
     public event Action? Saved;
 
-    public SettingsForm(ProfileEngine engine)
+    public bool HasUnsavedChanges => _dirty;
+
+    public SettingsForm(ProfileEngine engine, Updater updater)
     {
         _engine = engine;
+        _updater = updater;
         _cfg = ConfigStore.DeepCopy(engine.Config);
 
         Text = "Easy Razer";
@@ -685,6 +691,7 @@ public sealed class SettingsForm : Form
                 row.Dot.Set(light.IsConnected ? DotState.Ok : DotState.Off, light.IsConnected ? "Connected" : "Not detected");
         _lightingStatus.Text = _engine.Lighting.Status;
         _activeProfile.Text = _engine.ActiveProfile is { } a ? $"Active: {a.Name}" : "";
+        _updateStatus.Text = $"Version {Updater.Current}  ·  {_updater.Status}";
     }
 
     // ================================================================== Settings page
@@ -700,6 +707,18 @@ public sealed class SettingsForm : Form
         var startup = FixedCard("Startup", 130);
         startup.Controls.Add(Stack(_autostart,
             new TextLabel("Closing this window keeps Easy Razer running in the tray. Use the tray icon's menu to exit.", 9.5f, color: Ui.TextDim) { Margin = new Padding(52, 0, 0, 0) }));
+
+        _autoUpdate.CheckedChanged += (_, _) =>
+        {
+            // A preference: saved straight away.
+            _cfg.AutoUpdate = _engine.Config.AutoUpdate = _autoUpdate.Checked;
+            try { ConfigStore.Save(_engine.Config); } catch (Exception ex) { Log.Error("Saving update setting failed", ex); }
+        };
+        var checkNow = new ModernButton { Text = "Check for updates now", Margin = new Padding(52, 0, 0, 0), Enabled = Updater.IsInstalled };
+        checkNow.Click += async (_, _) => await _updater.CheckAsync(manual: true);
+        var updates = FixedCard("Updates", 176);
+        updates.Controls.Add(Stack(_autoUpdate, _updateStatus, checkNow));
+        _autoUpdate.Enabled = Updater.IsInstalled;
 
         var openLog = new ModernButton { Text = "Open log", Icon = Ui.IconSearch };
         var openFolder = new ModernButton { Text = "Open settings folder", Icon = Ui.IconFolder };
@@ -718,7 +737,7 @@ public sealed class SettingsForm : Form
         about.Controls.Add(Stack(new TextLabel($"Easy Razer {version}", 10f, semibold: true),
             new TextLabel("Per-game keybinds and lighting for Razer devices, without Synapse.", 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 4, 0, 0) }));
 
-        return Page("Settings", "App preferences.", startup, trouble, about);
+        return Page("Settings", "App preferences.", startup, updates, trouble, about);
     }
 
     private static void Shell(string path)
@@ -787,6 +806,7 @@ public sealed class SettingsForm : Form
         _openRgbPath.Text = _cfg.Lighting.OpenRgbPath;
         _useOpenRgb.Checked = _cfg.Lighting.UseOpenRgb;
         _openRgbPath.Enabled = _openRgbBrowse.Enabled = _cfg.Lighting.UseOpenRgb;
+        _autoUpdate.Checked = _cfg.AutoUpdate;
         RefreshStatus();
         _dirty = false;
         UpdateDirtyUi();

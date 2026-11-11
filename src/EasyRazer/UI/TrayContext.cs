@@ -19,7 +19,9 @@ public sealed class TrayContext : ApplicationContext
     private readonly RegisteredWaitHandle _showWait;
     private Icon? _currentIcon;
 
-    public TrayContext(AppConfig config, bool openSettings)
+    private readonly Updater _updater;
+
+    public TrayContext(AppConfig config, bool openSettings, bool justUpdated = false)
     {
         _engine = new ProfileEngine(config);
         var ui = SynchronizationContext.Current!;
@@ -47,6 +49,7 @@ public sealed class TrayContext : ApplicationContext
         menu.Items.Add("Re-apply color", null, async (_, _) => await _engine.ReapplyLightingAsync());
         menu.Items.Add(_pauseItem);
         menu.Items.Add("Open log", null, (_, _) => OpenLog());
+        menu.Items.Add("Check for updates", null, async (_, _) => await _updater!.CheckAsync(manual: true));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
@@ -58,6 +61,18 @@ public sealed class TrayContext : ApplicationContext
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
         UpdateIcon();
+
+        // Updates: only restart the app when you're on the desktop and have nothing unsaved.
+        _updater = new Updater(() =>
+            _engine.ActiveProfile is null or { IsDefault: true } &&
+            (_settings is null || _settings.IsDisposed || !_settings.HasUnsavedChanges))
+        {
+            AutoInstallEnabled = () => _engine.Config.AutoUpdate,
+        };
+        _updater.Installing += v => _tray.ShowBalloonTip(3000, "Easy Razer", $"Installing update {v}…", ToolTipIcon.Info);
+        _updater.StatusChanged += () => _settings?.RefreshStatus();
+        if (justUpdated)
+            _tray.ShowBalloonTip(4000, "Easy Razer updated", $"Now running version {Updater.Current}.", ToolTipIcon.Info);
 
         _engine.ProfileApplied += p =>
         {
@@ -86,7 +101,7 @@ public sealed class TrayContext : ApplicationContext
             _settings.Activate();
             return;
         }
-        _settings = new SettingsForm(_engine);
+        _settings = new SettingsForm(_engine, _updater);
         _settings.Saved += UpdateIcon;
         _settings.Show();
     }
@@ -135,6 +150,7 @@ public sealed class TrayContext : ApplicationContext
         _tray.Visible = false;
         _tray.Dispose();
         _engine.Dispose();
+        _updater.Dispose();
         _settings?.Close();
         base.ExitThreadCore();
     }
