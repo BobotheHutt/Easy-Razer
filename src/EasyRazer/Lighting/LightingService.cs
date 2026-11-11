@@ -1,15 +1,16 @@
 using System.Diagnostics;
 using EasyRazer.Config;
 using EasyRazer.Core;
+using EasyRazer.Devices;
 using OpenRGB.NET;
 using Color = OpenRGB.NET.Color;
 
 namespace EasyRazer.Lighting;
 
 /// <summary>
-/// Sets every device OpenRGB knows about to one static color.
-/// OpenRGB runs hidden in server mode; this class only connects to it and sends the color.
-/// Prefers each device's hardware "Static" mode (the device remembers it) and falls back to "Direct".
+/// Sets every device to one static color.
+/// Razer devices Easy Razer knows (Naga Trinity, Tartarus Pro, Cynosa Chroma) are set directly over USB.
+/// Optionally, OpenRGB (running hidden as a server) handles any other devices; it's off by default.
 /// </summary>
 public sealed class LightingService
 {
@@ -17,7 +18,7 @@ public sealed class LightingService
 
     public string Status { get; private set; } = "Not applied yet";
 
-    public async Task ApplyAsync(AppConfig cfg)
+    public async Task ApplyAsync(AppConfig cfg, IEnumerable<ILightingDevice> devices)
     {
         var settings = cfg.Lighting;
         if (!settings.Enabled)
@@ -31,20 +32,59 @@ public sealed class LightingService
             return;
         }
 
+        var connected = devices.Where(d => d.IsConnected).ToList();
         await _gate.WaitAsync();
         try
         {
-            await Task.Run(() => ApplyCore(settings, color));
+            var native = await Task.Run(() => ApplyNative(connected, color));
+            Status = native;
+            if (settings.UseOpenRgb)
+            {
+                try
+                {
+                    await Task.Run(() => ApplyCore(settings, color));
+                    Status = native + "\nOpenRGB: " + Status;
+                }
+                catch (Exception ex)
+                {
+                    Status = native + "\nOpenRGB: couldn't reach it (is the path right?)";
+                    Log.Error("OpenRGB lighting failed", ex);
+                }
+            }
         }
         catch (Exception ex)
         {
-            Status = "Could not reach OpenRGB — is it installed and running with its SDK server on?";
+            Status = "Lighting failed, see log";
             Log.Error("Lighting failed", ex);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private static string ApplyNative(List<ILightingDevice> devices, Color color)
+    {
+        if (devices.Count == 0) return "No supported Razer devices connected";
+        var ok = new List<string>();
+        var failed = new List<string>();
+        foreach (var d in devices)
+        {
+            try
+            {
+                if (d.SetStaticColor(color.R, color.G, color.B)) ok.Add(d.DisplayName);
+                else failed.Add(d.DisplayName);
+            }
+            catch (Exception ex)
+            {
+                failed.Add(d.DisplayName);
+                Log.Warn($"Lighting: {d.DisplayName} failed: {ex.Message}");
+            }
+        }
+        var text = ok.Count > 0 ? $"Set: {string.Join(", ", ok)}" : "";
+        if (failed.Count > 0) text += (text.Length > 0 ? ". " : "") + $"Failed: {string.Join(", ", failed)} (see log)";
+        Log.Info($"Lighting #{color.R:X2}{color.G:X2}{color.B:X2}: {text}");
+        return text;
     }
 
     private void ApplyCore(LightingSettings settings, Color color)

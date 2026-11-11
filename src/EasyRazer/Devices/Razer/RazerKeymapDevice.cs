@@ -34,7 +34,7 @@ public enum KeymapStyle
 /// Profile byte: 0x00 = live layer (takes effect immediately, gone after unplug, no flash wear),
 /// 0x01 = onboard profile 1 (stored permanently).
 /// </summary>
-public abstract class RazerKeymapDevice : IKeymapDevice
+public abstract class RazerKeymapDevice : IKeymapDevice, ILightingDevice
 {
     public const byte ProfileLive = 0x00;
     public const byte ProfilePersistent = 0x01;
@@ -76,7 +76,7 @@ public abstract class RazerKeymapDevice : IKeymapDevice
 
         if (_link != null) return; // already talking to it
 
-        _link = RazerHidLink.Open(ProductId, settings.TransactionId);
+        _link = RazerHidLink.Open(ProductId, settings.TransactionId, 0x1F);
         UpdateStatus(settings);
     }
 
@@ -190,6 +190,26 @@ public abstract class RazerKeymapDevice : IKeymapDevice
                          (unchanged > 0 ? $", {unchanged} already up to date" : ""));
             UpdateStatus(settings);
         }
+    }
+
+    // ------------------------------------------------------------------ lighting
+
+    /// <summary>The command(s) that set this device to one static color.</summary>
+    protected abstract IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b);
+
+    public bool SetStaticColor(byte r, byte g, byte b)
+    {
+        if (_link == null) return false;
+        foreach (var report in StaticColorReports(_link.TransactionId, r, g, b))
+        {
+            var reply = _link.Send(report);
+            if (reply is not { Status: 0x02 })
+            {
+                Log.Warn($"{DisplayName}: color command refused ({reply?.Status.ToString("X2") ?? "no answer"}): {report.Describe()}");
+                return false;
+            }
+        }
+        return true;
     }
 
     // ------------------------------------------------------------------ low level

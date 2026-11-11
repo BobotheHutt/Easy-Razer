@@ -30,6 +30,10 @@ public sealed class ProfileEngine : IDisposable
 
     public AppConfig Config { get; private set; }
     public IReadOnlyList<IKeymapDevice> Devices { get; } = new List<IKeymapDevice> { new TartarusPro(), new NagaTrinity() };
+    private readonly CynosaChroma _cynosa = new();
+
+    /// <summary>Devices whose color Easy Razer sets itself.</summary>
+    public IEnumerable<ILightingDevice> LightingDevices => Devices.OfType<ILightingDevice>().Append(_cynosa);
     public LightingService Lighting => _lighting;
     public Profile? ActiveProfile => _active;
 
@@ -69,7 +73,7 @@ public sealed class ProfileEngine : IDisposable
     {
         Log.Info("Easy Razer starting");
         await RefreshDevicesAsync();
-        _ = _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+        _ = _lighting.ApplyAsync(Config, LightingDevices).ContinueWith(_ => RaiseStatus());
         // Make sure the device's own memory holds the desktop binds, so it behaves even if we're not running.
         await WriteAsync(Config.DefaultProfile, persist: true);
         Evaluate(ForegroundWatcher.CurrentExe(), force: true);
@@ -82,7 +86,7 @@ public sealed class ProfileEngine : IDisposable
         ConfigStore.Save(Config);
         Log.Info("Settings saved");
 
-        if (colorChanged) _ = _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+        if (colorChanged) _ = _lighting.ApplyAsync(Config, LightingDevices).ContinueWith(_ => RaiseStatus());
         await RefreshDevicesAsync();
         await WriteAsync(Config.DefaultProfile, persist: true);
         _active = null; // profile objects were replaced; force a re-apply
@@ -116,7 +120,7 @@ public sealed class ProfileEngine : IDisposable
     /// <summary>Write the active profile again (e.g. after learning keys).</summary>
     public void Reapply() => Evaluate(ForegroundWatcher.CurrentExe(), force: true);
 
-    public Task ReapplyLightingAsync() => _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+    public Task ReapplyLightingAsync() => _lighting.ApplyAsync(Config, LightingDevices).ContinueWith(_ => RaiseStatus());
 
     /// <summary>Pick the right profile for the given foreground exe and apply it if it changed.</summary>
     private void Evaluate(string? foregroundExe, bool force)
@@ -239,6 +243,8 @@ public sealed class ProfileEngine : IDisposable
                     try { dev.Refresh(Config.DeviceSettingsFor(dev.KindId)); }
                     catch (Exception ex) { Log.Error($"{dev.DisplayName}: detection failed", ex); }
                 }
+                try { _cynosa.Refresh(); }
+                catch (Exception ex) { Log.Error($"{_cynosa.DisplayName}: detection failed", ex); }
             });
         }
         finally
@@ -250,14 +256,16 @@ public sealed class ProfileEngine : IDisposable
 
     private async Task OnHardwareChangedAsync()
     {
-        var before = Devices.Where(d => d.IsConnected).Select(d => d.KindId).ToHashSet();
+        var keymapBefore = Devices.Where(d => d.IsConnected).Select(d => d.KindId).ToHashSet();
+        var lightsBefore = LightingDevices.Where(d => d.IsConnected).Select(d => d.DisplayName).ToHashSet();
         await RefreshDevicesAsync();
-        var newlyConnected = Devices.Any(d => d.IsConnected && !before.Contains(d.KindId));
-        if (newlyConnected)
+        if (Devices.Any(d => d.IsConnected && !keymapBefore.Contains(d.KindId)))
         {
             Log.Info("Device plugged in, re-applying profile");
             if (_active != null) await WriteAsync(_active, persist: false);
         }
+        if (LightingDevices.Any(d => d.IsConnected && !lightsBefore.Contains(d.DisplayName)))
+            await ReapplyLightingAsync();
     }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)

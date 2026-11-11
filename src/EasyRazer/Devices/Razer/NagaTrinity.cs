@@ -17,6 +17,9 @@ public sealed class NagaTrinity : RazerKeymapDevice
     public override int ProductId => 0x0067;
     public override KeymapStyle Style => KeymapStyle.Mouse;
 
+    protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) =>
+        RazerLighting.NagaTrinityStatic(tid, r, g, b);
+
     public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
     {
         new("right", "Right click", 0x02, M(MouseAction.Right)),

@@ -27,7 +27,13 @@ public sealed class SettingsForm : Form
     // Lighting tab
     private readonly Panel _swatch = new() { Width = 64, Height = 32, BorderStyle = BorderStyle.FixedSingle };
     private readonly TextBox _hex = new() { Width = 90 };
-    private readonly CheckBox _lightingOn = new() { Text = "Control lighting (through OpenRGB)", AutoSize = true };
+    private readonly CheckBox _lightingOn = new() { Text = "Control lighting", AutoSize = true };
+    private readonly CheckBox _useOpenRgb = new()
+    {
+        Text = "Also use OpenRGB for other devices (optional; needs OpenRGB downloaded)",
+        AutoSize = true,
+        Margin = new Padding(0, 16, 0, 0),
+    };
     private readonly TextBox _openRgbPath = new() { Width = 380 };
     private readonly Label _lightingStatus = new() { AutoSize = true, MaximumSize = new Size(520, 0) };
 
@@ -442,19 +448,28 @@ public sealed class SettingsForm : Form
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             _openRgbPath.Text = dlg.FileName;
         };
+        _useOpenRgb.CheckedChanged += (_, _) =>
+        {
+            _openRgbPath.Enabled = _useOpenRgb.Checked;
+            if (_cfg.Lighting.UseOpenRgb != _useOpenRgb.Checked) { _cfg.Lighting.UseOpenRgb = _useOpenRgb.Checked; MarkDirty(); }
+        };
         _openRgbPath.TextChanged += (_, _) => { if (_cfg.Lighting.OpenRgbPath != _openRgbPath.Text) { _cfg.Lighting.OpenRgbPath = _openRgbPath.Text; MarkDirty(); } };
 
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         flow.Controls.Add(new Label
         {
-            Text = "One static color for every device. Applied when you press Save, at startup, after sleep, and on reconnect.",
+            Text = "One static color, set directly on your Naga Trinity, Tartarus Pro and Cynosa Chroma. " +
+                   "Applied when you press Save, at startup, after sleep, and on reconnect.\n\n" +
+                   "The mic, soundbar and control pod keep the color saved on them (set it once in Synapse before uninstalling, " +
+                   "or turn on OpenRGB below if it supports them).",
             AutoSize = true,
             MaximumSize = new Size(560, 0),
             Margin = new Padding(0, 0, 0, 12),
         });
         flow.Controls.Add(Row(new Label { Text = "Color:", AutoSize = true, Padding = new Padding(0, 8, 0, 0) }, _swatch, _hex, pick));
         flow.Controls.Add(_lightingOn);
-        flow.Controls.Add(new Label { Text = "OpenRGB.exe (started hidden automatically if it isn't running):", AutoSize = true, Margin = new Padding(0, 16, 0, 2) });
+        flow.Controls.Add(_useOpenRgb);
+        flow.Controls.Add(new Label { Text = "OpenRGB.exe (started hidden automatically if it isn't running):", AutoSize = true, Margin = new Padding(0, 4, 0, 2) });
         flow.Controls.Add(Row(_openRgbPath, browse));
         flow.Controls.Add(new Label { Text = "Status:", AutoSize = true, Margin = new Padding(0, 16, 0, 2) });
         flow.Controls.Add(_lightingStatus);
@@ -604,6 +619,8 @@ public sealed class SettingsForm : Form
         _hex.Text = _cfg.Color;
         _lightingOn.Checked = _cfg.Lighting.Enabled;
         _openRgbPath.Text = _cfg.Lighting.OpenRgbPath;
+        _useOpenRgb.Checked = _cfg.Lighting.UseOpenRgb;
+        _openRgbPath.Enabled = _cfg.Lighting.UseOpenRgb;
         RefreshStatus();
         _dirty = false;
         UpdateTitle();
@@ -613,6 +630,7 @@ public sealed class SettingsForm : Form
     {
         var colorChanged = _cfg.Color != _engine.Config.Color
                            || _cfg.Lighting.Enabled != _engine.Config.Lighting.Enabled
+                           || _cfg.Lighting.UseOpenRgb != _engine.Config.Lighting.UseOpenRgb
                            || _cfg.Lighting.OpenRgbPath != _engine.Config.Lighting.OpenRgbPath;
         var selected = SelectedProfile?.Name;
         try

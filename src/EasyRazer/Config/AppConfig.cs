@@ -51,6 +51,10 @@ public sealed class AppConfig
 public sealed class LightingSettings
 {
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Also use OpenRGB for devices Easy Razer can't light itself (optional, off by default).</summary>
+    public bool UseOpenRgb { get; set; }
+
     /// <summary>Full path to OpenRGB.exe. When set, Easy Razer starts it hidden if it isn't running.</summary>
     public string OpenRgbPath { get; set; } = "";
     public string Host { get; set; } = "127.0.0.1";

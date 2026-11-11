@@ -16,6 +16,9 @@ public sealed class TartarusPro : RazerKeymapDevice
     public override int ProductId => 0x0244;
     public override KeymapStyle Style => KeymapStyle.AnalogKeyboard;
 
+    protected override IEnumerable<RazerReport> StaticColorReports(byte tid, byte r, byte g, byte b) =>
+        new[] { RazerLighting.ExtendedStatic(tid, RazerLighting.BacklightLed, r, g, b) };
+
     public override IReadOnlyList<ButtonDef> Buttons { get; } = new List<ButtonDef>
     {
         new("key01", "Key 01", null, K(Keys.D1)),

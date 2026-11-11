@@ -33,13 +33,15 @@ public sealed class RazerHidLink : IDisposable
     /// Looks at every HID interface with the given product id and returns the first one that answers
     /// a harmless "get firmware version" request (command 00:81). Returns null if the device isn't plugged in.
     /// </summary>
-    public static RazerHidLink? Open(int productId, byte? forcedTransactionId)
+    public static RazerHidLink? Open(int productId, byte? forcedTransactionId, byte? preferredTransactionId = null)
     {
         var candidates = DeviceList.Local.GetHidDevices(RazerVendorId, productId)
             .Where(SupportsRazerReports)
             .ToList();
 
-        var tids = forcedTransactionId.HasValue ? new[] { forcedTransactionId.Value } : CandidateTransactionIds;
+        var tids = forcedTransactionId.HasValue
+            ? new[] { forcedTransactionId.Value }
+            : CandidateTransactionIds.OrderBy(t => t == preferredTransactionId ? 0 : 1).ToArray();
 
         foreach (var dev in candidates)
         foreach (var tid in tids)
