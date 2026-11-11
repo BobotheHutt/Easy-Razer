@@ -61,10 +61,10 @@ doesn't work (tray icon → Open log).
 
 ## Building from source
 
-Needs the .NET 10 SDK.
+Needs the .NET 10 SDK. The exe bundles .NET (nothing for users to install) and is precompiled (ReadyToRun) so it starts quickly. Native AOT isn't an option: Windows Forms doesn't support it.
 
 ```
-dotnet publish src/EasyRazer/EasyRazer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+dotnet publish src/EasyRazer/EasyRazer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true -o publish
 ```
 
 Every push to `main` also builds the exe on GitHub Actions and updates the **Latest build** release.
