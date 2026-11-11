@@ -12,12 +12,14 @@ internal static class Program
         using var mutex = new Mutex(true, @"Local\EasyRazer.SingleInstance", out var firstInstance);
         if (!firstInstance)
         {
-            MessageBox.Show("Easy Razer is already running — look for its icon in the system tray.",
-                "Easy Razer", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // Already running: ask that copy to bring its window up instead.
+            try { EventWaitHandle.OpenExisting(TrayContext.ShowWindowSignal).Set(); } catch { }
             return;
         }
 
         ApplicationConfiguration.Initialize();
+        // Make sure everything created below (engine, tray) posts its updates to this UI thread.
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         Application.ThreadException += (_, e) => Log.Error("Unhandled UI exception", e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Error("Unhandled exception", e.ExceptionObject as Exception);
 

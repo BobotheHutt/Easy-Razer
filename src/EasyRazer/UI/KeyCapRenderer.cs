@@ -6,7 +6,7 @@ namespace EasyRazer.UI;
 /// <summary>Colors and drawing helpers shared by the device picture and the on-screen keyboard.</summary>
 public static class Theme
 {
-    public static readonly Color Background = Color.FromArgb(24, 24, 27);
+    public static readonly Color Background = Color.FromArgb(30, 30, 35); // matches the card behind the drawings
     public static readonly Color Outline = Color.FromArgb(70, 70, 78);
     public static readonly Color Key = Color.FromArgb(44, 44, 50);
     public static readonly Color KeyHover = Color.FromArgb(62, 62, 70);

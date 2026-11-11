@@ -14,11 +14,17 @@ public sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _profileItem;
     private readonly ToolStripMenuItem _pauseItem;
     private SettingsForm? _settings;
+    public const string ShowWindowSignal = @"Local\EasyRazer.ShowWindow";
+    private readonly EventWaitHandle _showSignal = new(false, EventResetMode.AutoReset, ShowWindowSignal);
+    private readonly RegisteredWaitHandle _showWait;
     private Icon? _currentIcon;
 
     public TrayContext(AppConfig config, bool openSettings)
     {
         _engine = new ProfileEngine(config);
+        var ui = SynchronizationContext.Current!;
+        _showWait = ThreadPool.RegisterWaitForSingleObject(_showSignal,
+            (_, _) => ui.Post(_ => ShowSettings(), null), null, Timeout.Infinite, executeOnlyOnce: false);
 
         _profileItem = new ToolStripMenuItem("Profile: starting…") { Enabled = false };
         _pauseItem = new ToolStripMenuItem("Pause automatic switching", null, (_, _) => TogglePause())
@@ -26,7 +32,15 @@ public sealed class TrayContext : ApplicationContext
             Checked = config.PauseSwitching,
         };
 
-        var menu = new ContextMenuStrip();
+        var menu = new ContextMenuStrip
+        {
+            Renderer = new DarkMenuRenderer(),
+            BackColor = Modern.Ui.Card,
+            ForeColor = Modern.Ui.Text,
+            Font = Modern.Ui.Font(10f),
+            ShowImageMargin = false,
+            ShowCheckMargin = true,
+        };
         menu.Items.Add(_profileItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
@@ -127,4 +141,37 @@ public sealed class TrayContext : ApplicationContext
 
     [DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr handle);
+}
+
+/// <summary>Dark styling for the tray menu.</summary>
+internal sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
+{
+    public DarkMenuRenderer() : base(new DarkColors()) => RoundedEdges = false;
+
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+    {
+        e.TextColor = e.Item.Enabled ? Modern.Ui.Text : Modern.Ui.TextDim;
+        base.OnRenderItemText(e);
+    }
+
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+    {
+        using var b = new SolidBrush(Modern.Ui.Accent);
+        e.Graphics.FillEllipse(b, e.ImageRectangle.X + 4, e.ImageRectangle.Y + 4, 8, 8);
+    }
+
+    private sealed class DarkColors : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground => Modern.Ui.Card;
+        public override Color MenuBorder => Modern.Ui.Border;
+        public override Color MenuItemBorder => Modern.Ui.Control;
+        public override Color MenuItemSelected => Modern.Ui.Control;
+        public override Color MenuItemSelectedGradientBegin => Modern.Ui.Control;
+        public override Color MenuItemSelectedGradientEnd => Modern.Ui.Control;
+        public override Color SeparatorDark => Modern.Ui.Border;
+        public override Color SeparatorLight => Modern.Ui.Card;
+        public override Color ImageMarginGradientBegin => Modern.Ui.Card;
+        public override Color ImageMarginGradientMiddle => Modern.Ui.Card;
+        public override Color ImageMarginGradientEnd => Modern.Ui.Card;
+    }
 }

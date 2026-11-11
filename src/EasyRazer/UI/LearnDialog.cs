@@ -2,6 +2,7 @@ using EasyRazer.Config;
 using EasyRazer.Core;
 using EasyRazer.Devices;
 using EasyRazer.Devices.Razer;
+using EasyRazer.UI.Modern;
 
 namespace EasyRazer.UI;
 
@@ -30,13 +31,13 @@ public sealed class LearnDialog : Form
     {
         Dock = DockStyle.Top,
         Height = 56,
-        Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+        Font = Ui.Font(12.5f, semibold: true),
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(8, 0, 0, 0),
     };
-    private readonly Button _start = new() { Text = "Start", AutoSize = true };
-    private readonly Button _skip = new() { Text = "Skip this one", AutoSize = true, Enabled = false };
-    private readonly Button _cancel = new() { Text = "Cancel", AutoSize = true };
+    private readonly ModernButton _start = new() { Text = "Start", Kind = ButtonKind.Primary, Margin = new Padding(8, 0, 0, 0) };
+    private readonly ModernButton _skip = new() { Text = "Skip this one", Enabled = false, Margin = new Padding(8, 0, 0, 0) };
+    private readonly ModernButton _cancel = new() { Text = "Cancel", Kind = ButtonKind.Ghost, Margin = new Padding(8, 0, 0, 0) };
     private readonly KeyRecorder _recorder = new() { EscapeCancels = true };
 
     private IDisposable? _lock;
@@ -57,8 +58,11 @@ public sealed class LearnDialog : Form
         Size = new Size(820, 620);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = false;
-        BackColor = Theme.Background;
-        ForeColor = Theme.Text;
+        BackColor = Ui.Card;
+        ForeColor = Ui.Text;
+        Font = Ui.Font(10f);
+        ShowInTaskbar = false;
+        Ui.DarkChrome(this, Ui.Card);
 
         _view.Shapes = device.Layout;
         _view.Describe = id => (_learned.ContainsKey(id) ? "✓" : "", _learned.ContainsKey(id) ? BindingSource.Custom : BindingSource.Factory);
@@ -71,14 +75,10 @@ public sealed class LearnDialog : Form
         _skip.Click += (_, _) => Next();
         _cancel.Click += (_, _) => Close();
 
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
-        foreach (var b in new[] { _cancel, _skip, _start })
-        {
-            b.FlatStyle = FlatStyle.Flat;
-            b.BackColor = Theme.Key;
-            b.ForeColor = Theme.Text;
-            buttons.Controls.Add(b);
-        }
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(16, 14, 16, 14), BackColor = Ui.Sidebar };
+        buttons.Controls.Add(_start);
+        buttons.Controls.Add(_skip);
+        buttons.Controls.Add(_cancel);
 
         Controls.Add(_view);
         Controls.Add(_prompt);

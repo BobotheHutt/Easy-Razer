@@ -1,140 +1,155 @@
 using System.ComponentModel;
 using EasyRazer.Config;
+using EasyRazer.UI.Modern;
 
 namespace EasyRazer.UI;
 
 /// <summary>
-/// The bottom half of the keybind editor. While a button is being recorded it shows the keys
-/// being pressed live. Otherwise you can also click a key on the on-screen keyboard, a mouse action,
-/// Disable or Reset. Raises <see cref="ActionChosen"/> when something is clicked.
+/// The editing half of the keybind card, split into two areas the window places itself:
+/// <see cref="ActionsPanel"/> (what the selected button does + mouse/turbo/DPI/other choices) and
+/// <see cref="KeyboardPanel"/> (Ctrl/Shift/Alt + the on-screen keyboard).
+/// While a button is being recorded it shows the keys being pressed live.
 /// </summary>
-public sealed class BindingPicker : UserControl
+public sealed class BindingPicker
 {
-    private static readonly Color ChosenFill = Color.FromArgb(40, 90, 30);
-
     private readonly Label _header = new()
     {
         Dock = DockStyle.Top,
         Height = 34,
-        Font = new Font("Segoe UI", 12f, FontStyle.Bold),
+        Font = Ui.Font(13f, semibold: true),
         TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(4, 0, 0, 0),
+        AutoEllipsis = true,
+        UseMnemonic = false,
+        BackColor = Ui.Card,
     };
-    private readonly Button _cancel = Flat("Cancel");
-    private readonly CheckBox _escapeCancels = new()
+    private readonly Label _subheader = new()
     {
-        Text = "Escape cancels (Escape can't be bound)",
-        AutoSize = true,
-        ForeColor = Theme.Text,
-        Padding = new Padding(0, 6, 0, 0),
+        Dock = DockStyle.Top,
+        Height = 26,
+        Font = Ui.Font(9.5f),
+        ForeColor = Ui.TextDim,
+        TextAlign = ContentAlignment.TopLeft,
+        AutoEllipsis = true,
+        UseMnemonic = false,
+        BackColor = Ui.Card,
     };
+    private readonly ModernButton _cancel = new() { Text = "Cancel", Kind = ButtonKind.Secondary, Visible = false, Height = 30, Font = Ui.Font(9.5f) };
+    private readonly ToggleSwitch _escapeCancels = new() { Text = "Esc cancels", Font = Ui.Font(9.5f) };
     private readonly KeyboardView _keyboard = new() { Dock = DockStyle.Fill };
-    private readonly CheckBox _ctrl = Toggle("Ctrl");
-    private readonly CheckBox _shift = Toggle("Shift");
-    private readonly CheckBox _alt = Toggle("Alt");
-    private readonly List<Button> _mouseButtons = new();
-    private readonly Button _autoLeft = Flat("Turbo left click");
-    private readonly Button _autoRight = Flat("Turbo right click");
-    private readonly NumericUpDown _autoRate = new()
-    {
-        Minimum = 1,
-        Maximum = 20,
-        Value = 15,
-        Width = 56,
-        BackColor = Theme.Key,
-        ForeColor = Theme.Text,
-        Margin = new Padding(3, 6, 0, 0),
-    };
-    private readonly Button _disable = Flat("Disable");
-    private readonly Button _reset = Flat("Reset to default");
+    private readonly ModernButton _ctrl = Pill("Ctrl");
+    private readonly ModernButton _shift = Pill("Shift");
+    private readonly ModernButton _alt = Pill("Alt");
+    private readonly List<ModernButton> _mouseButtons = new();
+    private readonly ModernButton _turboLeft = Pill("Left");
+    private readonly ModernButton _turboRight = Pill("Right");
+    private readonly ModernButton _rateDown = Pill("−");
+    private readonly ModernButton _rateUp = Pill("+");
+    private readonly Label _rate = new() { AutoSize = false, Width = 50, Height = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Ui.Text, Font = Ui.Font(9.5f, semibold: true), BackColor = Ui.Card, Margin = new Padding(0, 0, 6, 0) };
+    private readonly ModernButton _disable = Pill("Disable");
+    private readonly ModernButton _reset = new() { Text = "Reset to default", Kind = ButtonKind.Ghost, Height = 30, Font = Ui.Font(9.5f), Padding = new Padding(10, 0, 10, 0) };
 
     private KeyAction? _current; // what's set in this profile (null = not set)
     private bool _loading;
     private bool _hasButton;
+    private int _turboRate = 15;
 
     public event Action<KeyAction>? ActionChosen;
     public event Action? CancelClicked;
     public event Action<bool>? EscapeCancelsChanged;
 
+    /// <summary>Selected button's state and the non-keyboard choices.</summary>
+    public Control ActionsPanel { get; }
+
+    /// <summary>Ctrl/Shift/Alt toggles and the on-screen keyboard.</summary>
+    public Control KeyboardPanel { get; }
+
     public BindingPicker()
     {
-        BackColor = Theme.Background;
-        ForeColor = Theme.Text;
-
         _keyboard.KeyClicked += k => Emit(new KeyAction
         {
             Type = ActionType.Key,
             Key = k.ToString(),
-            Ctrl = _ctrl.Checked,
-            Shift = _shift.Checked,
-            Alt = _alt.Checked,
+            Ctrl = _ctrl.Active,
+            Shift = _shift.Active,
+            Alt = _alt.Active,
         });
 
         foreach (var t in new[] { _ctrl, _shift, _alt })
-            t.CheckedChanged += (_, _) =>
+            t.Click += (_, _) =>
             {
+                t.Active = !t.Active;
                 if (_loading || _current is not { Type: ActionType.Key } cur) return;
                 var updated = cur.Clone();
-                updated.Ctrl = _ctrl.Checked;
-                updated.Shift = _shift.Checked;
-                updated.Alt = _alt.Checked;
+                updated.Ctrl = _ctrl.Active;
+                updated.Shift = _shift.Active;
+                updated.Alt = _alt.Active;
                 Emit(updated);
             };
 
         foreach (var m in Enum.GetValues<MouseAction>())
         {
-            var b = Flat(KeyLabels.Mouse(m));
+            var b = Pill(ShortMouse(m));
             b.Tag = m;
             b.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Mouse, Mouse = m });
             _mouseButtons.Add(b);
         }
-        _autoLeft.Click += (_, _) => EmitAutoClick(MouseAction.Left);
-        _autoRight.Click += (_, _) => EmitAutoClick(MouseAction.Right);
-        _autoRate.ValueChanged += (_, _) =>
-        {
-            if (_loading || _current is not { TurboRate: not null } cur) return;
-            EmitAutoClick(cur.Mouse);
-        };
+        _turboLeft.Click += (_, _) => EmitTurbo(MouseAction.Left);
+        _turboRight.Click += (_, _) => EmitTurbo(MouseAction.Right);
+        _rateDown.Click += (_, _) => ChangeRate(-1);
+        _rateUp.Click += (_, _) => ChangeRate(+1);
         _disable.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Disabled });
         _reset.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Default });
         _cancel.Click += (_, _) => CancelClicked?.Invoke();
-        _cancel.Visible = false;
 
         _escapeCancels.CheckedChanged += (_, _) =>
         {
             _keyboard.DisabledKeys = _escapeCancels.Checked ? new[] { Keys.Escape } : Array.Empty<Keys>();
             if (!_loading) EscapeCancelsChanged?.Invoke(_escapeCancels.Checked);
         };
+        UpdateRateLabel();
 
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, WrapContents = false };
-        top.Controls.AddRange(new Control[] { _escapeCancels, _cancel });
-
-        var hint = Dim("Or click instead:  hold with");
-        var modRow = Row(hint, _ctrl, _shift, _alt, Dim("then click a key above"));
-        var mouseRow = Row(Dim("Mouse:"));
-        mouseRow.Controls.AddRange(_mouseButtons
-            .Where(b => (MouseAction)b.Tag! is not (MouseAction.DpiUp or MouseAction.DpiDown)).ToArray<Control>());
-        var autoRow = Row(Dim("Turbo (clicks repeatedly while held):"), _autoLeft, _autoRight, _autoRate, Dim("clicks/sec"));
-        var otherRow = Row(Dim("Other:"));
-        otherRow.Controls.AddRange(_mouseButtons
-            .Where(b => (MouseAction)b.Tag! is MouseAction.DpiUp or MouseAction.DpiDown).ToArray<Control>());
-        otherRow.Controls.Add(_disable);
-        otherRow.Controls.Add(_reset);
-
-        var bottom = new FlowLayoutPanel
+        // ---- actions panel
+        MouseAction[] clicks = { MouseAction.Left, MouseAction.Right, MouseAction.Middle, MouseAction.Back, MouseAction.Forward };
+        MouseAction[] scrollDpi = { MouseAction.ScrollUp, MouseAction.ScrollDown, MouseAction.DpiUp, MouseAction.DpiDown };
+        var lines = new FlowLayoutPanel
         {
-            Dock = DockStyle.Bottom,
+            Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Ui.Card,
+            Padding = new Padding(0, 8, 0, 0),
         };
-        bottom.Controls.AddRange(new Control[] { modRow, mouseRow, autoRow, otherRow });
+        lines.Controls.Add(Line("Mouse", _mouseButtons.Where(b => clicks.Contains((MouseAction)b.Tag!)).ToArray<Control>()));
+        lines.Controls.Add(Line("Scroll / DPI", _mouseButtons.Where(b => scrollDpi.Contains((MouseAction)b.Tag!)).ToArray<Control>()));
+        lines.Controls.Add(Line("Turbo", _turboLeft, _turboRight, Spacer(10), _rateDown, _rate, _rateUp));
+        lines.Controls.Add(Line("Other", _disable, _reset));
 
-        Controls.Add(_keyboard);
-        Controls.Add(bottom);
-        Controls.Add(top);
-        Controls.Add(_header);
+        var cancelRow = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 0, AutoSize = true, BackColor = Ui.Card, WrapContents = false };
+        cancelRow.Controls.Add(_cancel);
+
+        var actions = new Panel { BackColor = Ui.Card, Padding = new Padding(8, 0, 0, 0) };
+        actions.Controls.Add(lines);
+        actions.Controls.Add(cancelRow);
+        actions.Controls.Add(_subheader);
+        actions.Controls.Add(_header);
+        ActionsPanel = actions;
+
+        // ---- keyboard panel
+        var modRow = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Ui.Card };
+        var mods = new FlowLayoutPanel { Dock = DockStyle.Left, AutoSize = true, WrapContents = false, BackColor = Ui.Card };
+        mods.Controls.Add(new TextLabel("HOLD WITH", 8f, semibold: true, color: Ui.TextFaint) { Margin = new Padding(0, 9, 10, 0) });
+        mods.Controls.AddRange(new Control[] { _ctrl, _shift, _alt });
+        mods.Controls.Add(new TextLabel("then click a key, or click a button above and just press it", 9f, color: Ui.TextFaint) { Margin = new Padding(8, 7, 0, 0) });
+        var escBox = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Ui.Card };
+        escBox.Controls.Add(_escapeCancels);
+        modRow.Controls.Add(mods);
+        modRow.Controls.Add(escBox);
+
+        var kb = new Panel { BackColor = Ui.Card };
+        kb.Controls.Add(_keyboard);
+        kb.Controls.Add(modRow);
+        KeyboardPanel = kb;
+
         ShowNothingSelected();
     }
 
@@ -155,73 +170,85 @@ public sealed class BindingPicker : UserControl
     {
         _hasButton = false;
         _current = null;
-        _header.Text = "Click a button on the device above, then press the key or combo you want.";
-        _header.ForeColor = Theme.TextDim;
+        _header.Text = "Pick a button";
+        _header.ForeColor = Ui.Text;
+        _subheader.Text = "Click any button on the device, then press the key or combo you want.";
         _cancel.Visible = false;
         SetEnabled(false);
         _keyboard.ChosenKey = null;
         _keyboard.HeldKeys = Array.Empty<Keys>();
-        HighlightMouse(null);
+        Highlight(null);
     }
 
     /// <summary>Recording: show the combo built so far and the keys currently held.</summary>
     public void ShowRecording(string label, KeyAction soFar, IReadOnlyCollection<Keys> held)
     {
         var combo = soFar.Key == null ? "" : KeyLabels.Action(soFar).Replace("+", " + ");
-        var cancelHint = EscapeCancels ? "Esc to cancel" : "click Cancel to stop";
-        _header.Text = combo.Length == 0
-            ? $"{label}:  press a key or combo…   ({cancelHint})"
-            : $"{label}:  {combo}   (let go to set it)";
-        _header.ForeColor = Theme.Recording;
+        _header.Text = combo.Length == 0 ? "Press a key or combo…" : combo;
+        _header.ForeColor = Ui.Warning;
+        _subheader.Text = combo.Length == 0
+            ? $"{label}  ·  {(EscapeCancels ? "Esc to cancel" : "click Cancel to stop")}"
+            : $"{label}  ·  let go of all keys to set it";
         _cancel.Visible = true;
         _keyboard.HeldKeys = held;
         _keyboard.ChosenKey = null;
-        HighlightMouse(null);
+        Highlight(null);
     }
 
     /// <summary>Show the button being edited and what it currently does.</summary>
-    /// <param name="setHere">The action set in this profile, or null if it inherits.</param>
-    /// <param name="effective">What the button actually does right now (for display).</param>
-    /// <param name="source">Where <paramref name="effective"/> comes from.</param>
     public void ShowButton(string label, KeyAction? setHere, KeyAction effective, BindingSource source)
     {
         _hasButton = true;
         _current = setHere;
-        var from = source switch
+        _header.Text = KeyLabels.Action(effective);
+        _header.ForeColor = source == BindingSource.Custom ? Theme.Custom : source == BindingSource.Inherited ? Theme.Inherited : Ui.Text;
+        _subheader.Text = label + source switch
         {
-            BindingSource.Custom => "",
-            BindingSource.Inherited => "  (from Default profile)",
-            _ => "  (factory)",
-        };
-        _header.Text = $"{label}  →  {KeyLabels.Action(effective)}{from}      click the button again to re-record";
-        _header.ForeColor = source == BindingSource.Custom ? Theme.Custom : source == BindingSource.Inherited ? Theme.Inherited : Theme.Text;
+            BindingSource.Custom => "  ·  set in this profile",
+            BindingSource.Inherited => "  ·  from the Default profile",
+            _ => "  ·  device default",
+        } + "  ·  click it again to re-record";
         _cancel.Visible = false;
         SetEnabled(true);
 
         _loading = true;
-        _ctrl.Checked = effective.Type == ActionType.Key && effective.Ctrl;
-        _shift.Checked = effective.Type == ActionType.Key && effective.Shift;
-        _alt.Checked = effective.Type == ActionType.Key && effective.Alt;
+        var isKey = effective.Type == ActionType.Key;
+        _ctrl.Active = isKey && effective.Ctrl;
+        _shift.Active = isKey && effective.Shift;
+        _alt.Active = isKey && effective.Alt;
+        if (effective.TurboRate is { } rate) { _turboRate = rate; UpdateRateLabel(); }
         _loading = false;
 
         _keyboard.HeldKeys = Array.Empty<Keys>();
-        _keyboard.ChosenKey = effective.Type == ActionType.Key && Enum.TryParse<Keys>(effective.Key, out var k) ? k : null;
-        HighlightMouse(effective.Type == ActionType.Mouse && effective.TurboRate == null ? effective.Mouse : null);
-        _disable.BackColor = effective.Type == ActionType.Disabled ? ChosenFill : Theme.Key;
-        var auto = effective.Type == ActionType.Mouse && effective.TurboRate != null;
-        _autoLeft.BackColor = auto && effective.Mouse == MouseAction.Left ? ChosenFill : Theme.Key;
-        _autoRight.BackColor = auto && effective.Mouse == MouseAction.Right ? ChosenFill : Theme.Key;
-        _loading = true;
-        if (auto) _autoRate.Value = Math.Clamp(effective.TurboRate!.Value, (int)_autoRate.Minimum, (int)_autoRate.Maximum);
-        _loading = false;
+        _keyboard.ChosenKey = isKey && Enum.TryParse<Keys>(effective.Key, out var k) ? k : null;
+        Highlight(effective);
         _reset.Enabled = setHere != null;
     }
 
-    private void EmitAutoClick(MouseAction button) => Emit(new KeyAction
+    private void Highlight(KeyAction? a)
+    {
+        var turbo = a is { Type: ActionType.Mouse, TurboRate: not null };
+        foreach (var b in _mouseButtons)
+            b.Active = a is { Type: ActionType.Mouse } && !turbo && (MouseAction)b.Tag! == a.Mouse;
+        _turboLeft.Active = turbo && a!.Mouse == MouseAction.Left;
+        _turboRight.Active = turbo && a!.Mouse == MouseAction.Right;
+        _disable.Active = a is { Type: ActionType.Disabled };
+    }
+
+    private void ChangeRate(int delta)
+    {
+        _turboRate = Math.Clamp(_turboRate + delta, 1, 20);
+        UpdateRateLabel();
+        if (_current is { Type: ActionType.Mouse, TurboRate: not null } cur) EmitTurbo(cur.Mouse);
+    }
+
+    private void UpdateRateLabel() => _rate.Text = $"{_turboRate}/s";
+
+    private void EmitTurbo(MouseAction button) => Emit(new KeyAction
     {
         Type = ActionType.Mouse,
         Mouse = button,
-        TurboRate = (int)_autoRate.Value,
+        TurboRate = _turboRate,
     });
 
     private void Emit(KeyAction action)
@@ -234,48 +261,53 @@ public sealed class BindingPicker : UserControl
     private void SetEnabled(bool on)
     {
         _keyboard.Enabled = on;
-        foreach (Control c in new Control[] { _ctrl, _shift, _alt, _disable, _reset, _autoLeft, _autoRight, _autoRate }) c.Enabled = on;
+        foreach (Control c in new Control[] { _ctrl, _shift, _alt, _disable, _reset, _turboLeft, _turboRight, _rateDown, _rateUp }) c.Enabled = on;
         foreach (var b in _mouseButtons) b.Enabled = on;
     }
 
-    private void HighlightMouse(MouseAction? m)
+    private static string ShortMouse(MouseAction m) => m switch
     {
-        foreach (var b in _mouseButtons)
-            b.BackColor = m.HasValue && (MouseAction)b.Tag! == m.Value ? ChosenFill : Theme.Key;
-    }
-
-    private static Label Dim(string text) =>
-        new() { Text = text, AutoSize = true, ForeColor = Theme.TextDim, Padding = new Padding(0, 8, 4, 0) };
-
-    private static CheckBox Toggle(string text) => new()
-    {
-        Text = text,
-        Appearance = Appearance.Button,
-        AutoSize = false,
-        Size = new Size(70, 30),
-        TextAlign = ContentAlignment.MiddleCenter,
-        FlatStyle = FlatStyle.Flat,
-        BackColor = Theme.Key,
-        ForeColor = Theme.Text,
-        FlatAppearance = { CheckedBackColor = ChosenFill, BorderColor = Theme.Outline },
+        MouseAction.Left => "Left",
+        MouseAction.Right => "Right",
+        MouseAction.Middle => "Middle",
+        MouseAction.Back => "Back",
+        MouseAction.Forward => "Fwd",
+        MouseAction.ScrollUp => "Scroll ↑",
+        MouseAction.ScrollDown => "Scroll ↓",
+        MouseAction.DpiUp => "DPI +",
+        MouseAction.DpiDown => "DPI −",
+        _ => m.ToString(),
     };
 
-    private static Button Flat(string text) => new()
+    private static ModernButton Pill(string text) => new()
     {
         Text = text,
-        AutoSize = true,
-        MinimumSize = new Size(0, 30),
-        FlatStyle = FlatStyle.Flat,
-        BackColor = Theme.Key,
-        ForeColor = Theme.Text,
-        FlatAppearance = { BorderColor = Theme.Outline },
-        Margin = new Padding(3),
+        Kind = ButtonKind.Secondary,
+        Height = 30,
+        Padding = new Padding(11, 0, 11, 0),
+        Margin = new Padding(0, 0, 6, 0),
+        Font = Ui.Font(9.5f),
     };
 
-    private static FlowLayoutPanel Row(params Control[] controls)
+    private static Control Spacer(int w) => new Panel { Width = w, Height = 1, BackColor = Ui.Card, Margin = Padding.Empty };
+
+    /// <summary>One labelled row of choices: "MOUSE   [Left] [Right] …".</summary>
+    private static Control Line(string title, params Control[] controls)
     {
-        var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(4, 2, 4, 2) };
-        p.Controls.AddRange(controls);
-        return p;
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Ui.Card, Margin = new Padding(0, 0, 0, 8) };
+        row.Controls.Add(new Label
+        {
+            Text = title.ToUpperInvariant(),
+            Font = Ui.Font(8f, semibold: true),
+            ForeColor = Ui.TextFaint,
+            AutoSize = false,
+            Width = 88,
+            Height = 30,
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Ui.Card,
+            Margin = Padding.Empty,
+        });
+        row.Controls.AddRange(controls);
+        return row;
     }
 }

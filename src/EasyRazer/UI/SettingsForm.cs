@@ -1,60 +1,66 @@
 using System.Diagnostics;
+using System.Reflection;
 using EasyRazer.Config;
 using EasyRazer.Core;
 using EasyRazer.Devices;
 using EasyRazer.Devices.Razer;
+using EasyRazer.UI.Modern;
 
 namespace EasyRazer.UI;
 
 /// <summary>
-/// Settings window. Edits a copy of the config; nothing changes on the devices until you press Save.
+/// The main window: sidebar navigation with Profiles, Lighting, Devices and Settings pages.
+/// Edits a copy of the config; nothing changes on the devices until you press Save.
 /// </summary>
 public sealed class SettingsForm : Form
 {
+    private static readonly string[] PresetColors =
+    {
+        "#44D62C", "#00E5FF", "#2979FF", "#7C4DFF", "#E040FB", "#FF4081",
+        "#FF1744", "#FF6D00", "#FFC400", "#FFFFFF", "#76FF03", "#000000",
+    };
+
     private readonly ProfileEngine _engine;
     private AppConfig _cfg;
     private bool _dirty;
 
-    // Profiles tab
-    private readonly ListBox _profiles = new() { Dock = DockStyle.Fill, IntegralHeight = false };
-    private readonly ListBox _games = new() { Dock = DockStyle.Fill, IntegralHeight = false };
-    private readonly ComboBox _activation = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
-    private readonly ComboBox _deviceKind = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
+    // Shell
+    private readonly Panel _content = new() { Dock = DockStyle.Fill, BackColor = Ui.Window, Padding = new Padding(28, 22, 28, 22) };
+    private readonly List<(NavItem Nav, Control Page)> _pages = new();
+    private readonly ModernButton _save = new() { Text = "Save changes", Icon = Ui.IconSave, Kind = ButtonKind.Primary, AutoSize = false, Height = 40, Dock = DockStyle.Bottom };
+    private readonly Label _saveHint = new() { Dock = DockStyle.Bottom, Height = 28, ForeColor = Ui.TextFaint, Font = Ui.Font(9f), TextAlign = ContentAlignment.MiddleCenter };
+    private readonly Label _activeProfile = new() { Dock = DockStyle.Top, Height = 22, ForeColor = Ui.TextFaint, Font = Ui.Font(9f), Padding = new Padding(22, 0, 0, 0), UseMnemonic = false };
+
+    // Profiles page
+    private readonly ModernList _profiles = new() { Dock = DockStyle.Fill };
+    private readonly Label _profileName = new() { AutoSize = true, Font = Ui.Font(20f, semibold: true), ForeColor = Ui.Text, UseMnemonic = false };
+    private readonly Label _profileHint = new() { AutoSize = true, Font = Ui.Font(10f), ForeColor = Ui.TextDim, UseMnemonic = false };
+    private readonly ModernButton _rename = new() { Text = "Rename", Icon = Ui.IconRename, Kind = ButtonKind.Ghost };
+    private readonly ModernButton _copy = new() { Text = "Duplicate", Icon = Ui.IconCopy, Kind = ButtonKind.Ghost };
+    private readonly ModernButton _delete = new() { Text = "Delete", Icon = Ui.IconDelete, Kind = ButtonKind.Danger };
+    private readonly FlowLayoutPanel _chips = new() { Dock = DockStyle.Fill, BackColor = Ui.Card, WrapContents = true, AutoScroll = true };
+    private readonly SegmentedControl _activation = new();
+    private readonly Panel _activationBox = new() { Dock = DockStyle.Right, Width = 330, BackColor = Ui.Card };
+    private readonly SegmentedControl _deviceKind = new();
     private readonly DeviceLayoutView _layout = new() { Dock = DockStyle.Fill };
-    private readonly BindingPicker _picker = new() { Dock = DockStyle.Fill };
-    private readonly GroupBox _gamesBox = new() { Text = "Linked games", Dock = DockStyle.Fill };
+    private readonly BindingPicker _picker = new();
 
-    // Lighting tab
-    private readonly Panel _swatch = new() { Width = 64, Height = 32, BorderStyle = BorderStyle.FixedSingle };
-    private readonly TextBox _hex = new() { Width = 90 };
-    private readonly CheckBox _lightingOn = new() { Text = "Control lighting", AutoSize = true };
-    private readonly CheckBox _useOpenRgb = new()
-    {
-        Text = "Also use OpenRGB for other devices (optional; needs OpenRGB downloaded)",
-        AutoSize = true,
-        Margin = new Padding(0, 16, 0, 0),
-    };
-    private readonly TextBox _openRgbPath = new() { Width = 380 };
-    private readonly Label _lightingStatus = new() { AutoSize = true, MaximumSize = new Size(520, 0) };
+    // Lighting page
+    private readonly ColorSwatch _bigSwatch = new() { Size = new Size(112, 112), Big = true };
+    private readonly InputBox _hex = new() { Width = 130 };
+    private readonly List<ColorSwatch> _presets = new();
+    private readonly ToggleSwitch _lightingOn = new() { Text = "Set the color on my Razer devices" };
+    private readonly Label _lightingStatus = new() { AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Ui.TextDim, Font = Ui.Font(9.5f), UseMnemonic = false };
+    private readonly ToggleSwitch _useOpenRgb = new() { Text = "Also use OpenRGB for other devices" };
+    private readonly InputBox _openRgbPath = new() { Width = 460 };
+    private readonly ModernButton _openRgbBrowse = new() { Text = "Browse…" };
 
-    // Devices tab
-    private readonly ListView _devices = new()
-    {
-        View = View.Details,
-        FullRowSelect = true,
-        MultiSelect = false,
-        Dock = DockStyle.Top,
-        Height = 110,
-    };
-    private readonly CheckBox _writeEnabled = new()
-    {
-        Text = "Write keybinds to this device",
-        AutoSize = true,
-        MaximumSize = new Size(560, 0),
-    };
+    // Devices page
+    private readonly FlowLayoutPanel _deviceCards = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Ui.Window };
+    private readonly Dictionary<string, (StatusDot Dot, ToggleSwitch? Write)> _deviceRows = new();
 
-    // General tab
-    private readonly CheckBox _autostart = new() { Text = "Start Easy Razer with Windows", AutoSize = true };
+    // Settings page
+    private readonly ToggleSwitch _autostart = new() { Text = "Start Easy Razer when I sign in to Windows" };
 
     private readonly KeyRecorder _recorder = new();
 
@@ -66,100 +72,159 @@ public sealed class SettingsForm : Form
         _cfg = ConfigStore.DeepCopy(engine.Config);
 
         Text = "Easy Razer";
-        Size = new Size(1180, 880);
-        MinimumSize = new Size(1000, 760);
+        Size = new Size(1340, 900);
+        MinimumSize = new Size(1180, 780);
         StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Ui.Window;
+        ForeColor = Ui.Text;
+        Font = Ui.Font(10f);
+        Ui.DarkChrome(this, Ui.Sidebar);
 
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        tabs.TabPages.Add(BuildProfilesTab());
-        tabs.TabPages.Add(BuildLightingTab());
-        tabs.TabPages.Add(BuildDevicesTab());
-        tabs.TabPages.Add(BuildGeneralTab());
+        Controls.Add(_content);
+        Controls.Add(BuildSidebar());
 
-        var save = new Button { Text = "Save", Width = 90 };
-        var close = new Button { Text = "Close", Width = 90 };
-        save.Click += async (_, _) => await SaveAsync();
-        close.Click += (_, _) => Close();
-        var bottom = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            FlowDirection = FlowDirection.RightToLeft,
-            Height = 42,
-            Padding = new Padding(6),
-        };
-        bottom.Controls.Add(close);
-        bottom.Controls.Add(save);
-
-        Controls.Add(tabs);
-        Controls.Add(bottom);
+        AddPage(Ui.IconProfiles, "Profiles", BuildProfilesPage());
+        AddPage(Ui.IconLighting, "Lighting", BuildLightingPage());
+        AddPage(Ui.IconDevices, "Devices", BuildDevicesPage());
+        AddPage(Ui.IconSettings, "Settings", BuildSettingsPage());
+        // EASYRAZER_PAGE=n opens a given page (used for screenshots).
+        ShowPage(int.TryParse(Environment.GetEnvironmentVariable("EASYRAZER_PAGE"), out var startPage) ? Math.Clamp(startPage, 0, 3) : 0);
 
         FormClosing += OnClosing;
         FormClosed += (_, _) => _recorder.Dispose();
         // Never keep listening to the keyboard once you leave this window.
         Deactivate += (_, _) => _recorder.Cancel();
+        KeyPreview = true;
+        KeyDown += (_, e) =>
+        {
+            if (e.Control && e.KeyCode == Keys.S) { e.SuppressKeyPress = true; _ = SaveAsync(); }
+        };
         LoadFromConfig();
     }
 
-    // ------------------------------------------------------------------ Profiles
+    // ================================================================== shell
 
-    private TabPage BuildProfilesTab()
+    private FlowLayoutPanel _nav = null!;
+
+    private Control BuildSidebar()
     {
-        var page = new TabPage("Profiles") { Padding = new Padding(8) };
+        var sidebar = new Panel { Dock = DockStyle.Left, Width = 232, BackColor = Ui.Sidebar, Padding = new Padding(14, 18, 14, 16) };
 
-        var add = new Button { Text = "Add", Width = 70 };
-        var rename = new Button { Text = "Rename", Width = 70 };
-        var copy = new Button { Text = "Copy", Width = 70 };
-        var delete = new Button { Text = "Delete", Width = 70 };
-        add.Click += (_, _) => AddProfile(null);
-        copy.Click += (_, _) => { if (SelectedProfile is { } p) AddProfile(p); };
-        rename.Click += (_, _) => RenameProfile();
-        delete.Click += (_, _) => DeleteProfile();
-        var profileButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64 };
-        profileButtons.Controls.AddRange(new Control[] { add, rename, copy, delete });
+        var brand = new BrandHeader { Dock = DockStyle.Top, Height = 46 };
+        _nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Ui.Sidebar, Padding = new Padding(0, 14, 0, 0) };
 
-        var left = new GroupBox { Text = "Profiles", Dock = DockStyle.Fill };
-        left.Controls.Add(_profiles);
-        left.Controls.Add(profileButtons);
+        _save.Click += async (_, _) => await SaveAsync();
+        var bottom = new Panel { Dock = DockStyle.Bottom, Height = 76, BackColor = Ui.Sidebar };
+        bottom.Controls.Add(_saveHint);
+        bottom.Controls.Add(_save);
 
-        // Games
-        var addRunning = new Button { Text = "Add running game…", AutoSize = true };
-        var browse = new Button { Text = "Browse for .exe…", AutoSize = true };
-        var removeGame = new Button { Text = "Remove", AutoSize = true };
-        addRunning.Click += (_, _) => AddRunningGame();
-        browse.Click += (_, _) => BrowseGame();
-        removeGame.Click += (_, _) => RemoveGame();
-        var gameButtons = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 150, FlowDirection = FlowDirection.TopDown };
-        gameButtons.Controls.AddRange(new Control[] { addRunning, browse, removeGame });
-        _gamesBox.Controls.Add(_games);
-        _gamesBox.Controls.Add(gameButtons);
+        sidebar.Controls.Add(_nav);
+        sidebar.Controls.Add(_activeProfile);
+        sidebar.Controls.Add(brand);
+        sidebar.Controls.Add(bottom);
+        return sidebar;
+    }
 
-        _activation.Items.Add("Only while the game is in front (alt-tab = desktop binds)");
-        _activation.Items.Add("As long as the game is running (even when alt-tabbed)");
+    private void AddPage(string icon, string title, Control page)
+    {
+        var nav = new NavItem(icon, title) { Dock = DockStyle.None, Width = 204, Margin = new Padding(-10, 0, 0, 2) };
+        var index = _pages.Count;
+        nav.Click += (_, _) => ShowPage(index);
+        _nav.Controls.Add(nav);
+        page.Dock = DockStyle.Fill;
+        page.Visible = false;
+        _content.Controls.Add(page);
+        _pages.Add((nav, page));
+    }
+
+    private void ShowPage(int index)
+    {
+        _recorder.Cancel();
+        for (var i = 0; i < _pages.Count; i++)
+        {
+            _pages[i].Nav.Selected = i == index;
+            _pages[i].Page.Visible = i == index;
+        }
+    }
+
+    private static Control PageHeader(string title, string subtitle)
+    {
+        var p = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Ui.Window };
+        p.Controls.Add(new TextLabel(subtitle, 10f, color: Ui.TextDim) { Location = new Point(0, 40) });
+        p.Controls.Add(new TextLabel(title, 20f, semibold: true) { Location = new Point(-2, 0) });
+        return p;
+    }
+
+    // ================================================================== Profiles page
+
+    private Control BuildProfilesPage()
+    {
+        // Left: profile list.
+        _profiles.Describe = o =>
+        {
+            var p = (Profile)o;
+            var sub = p.IsDefault ? "Desktop & unlinked games"
+                : p.Games.Count == 0 ? "No games linked yet"
+                : p.Games.Count == 1 ? p.Games[0] : $"{p.Games.Count} games";
+            return (p.Name, sub);
+        };
+        _profiles.SelectedIndexChanged += (_, _) => { _recorder.Cancel(); ShowProfile(); };
+        var newProfile = new ModernButton { Text = "New profile", Icon = Ui.IconAdd, Kind = ButtonKind.Primary, AutoSize = false, Height = 38, Dock = DockStyle.Bottom };
+        newProfile.Click += (_, _) => AddProfile(null);
+        var listCard = new Card { Title = "Profiles", Dock = DockStyle.Fill, Padding = new Padding(10, 48, 10, 12), Margin = new Padding(0, 0, 16, 0) };
+        listCard.Controls.Add(_profiles);
+        listCard.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 10, BackColor = Ui.Card });
+        listCard.Controls.Add(newProfile);
+
+        // Right: header.
+        _rename.Click += (_, _) => RenameProfile();
+        _copy.Click += (_, _) => { if (SelectedProfile is { } p) AddProfile(p); };
+        _delete.Click += (_, _) => DeleteProfile();
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Ui.Window, Padding = new Padding(0, 10, 0, 0) };
+        actions.Controls.AddRange(new Control[] { _rename, _copy, _delete });
+        var titles = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Window };
+        _profileName.Location = new Point(-2, 0);
+        _profileHint.Location = new Point(0, 42);
+        titles.Controls.Add(_profileName);
+        titles.Controls.Add(_profileHint);
+        var header = new Panel { Dock = DockStyle.Fill, BackColor = Ui.Window };
+        header.Controls.Add(titles);
+        header.Controls.Add(actions);
+
+        // Right: linked games + when active.
+        _activation.SetItems("While the game is in front", "While it's running");
         _activation.SelectedIndexChanged += (_, _) =>
         {
-            if (SelectedProfile is { } p && _activation.SelectedIndex >= 0)
+            if (SelectedProfile is { IsDefault: false } p && p.Activation != (ActivationMode)_activation.SelectedIndex)
             {
-                var mode = (ActivationMode)_activation.SelectedIndex;
-                if (p.Activation != mode) { p.Activation = mode; MarkDirty(); }
+                p.Activation = (ActivationMode)_activation.SelectedIndex;
+                MarkDirty();
             }
         };
+        _activationBox.Controls.Add(_activation);
+        _activationBox.Controls.Add(new TextLabel("ACTIVE", 8f, semibold: true, color: Ui.TextFaint) { Location = new Point(2, 0) });
+        _activation.Location = new Point(0, 22);
+        _activationBox.Width = _activation.Width + 4;
+        var gamesCard = new Card { Title = "Linked games", Dock = DockStyle.Fill, Padding = new Padding(20, 48, 20, 8), Margin = new Padding(0, 0, 0, 14) };
+        gamesCard.Controls.Add(_chips);
+        gamesCard.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 24, BackColor = Ui.Card });
+        gamesCard.Controls.Add(_activationBox);
 
-        foreach (var d in _engine.Devices) _deviceKind.Items.Add(d.DisplayName);
+        // Right: keybinds.
+        _deviceKind.SetItems(_engine.Devices.Select(d => d.DisplayName).ToArray());
         _deviceKind.SelectedIndexChanged += (_, _) => { _recorder.Cancel(); ShowDeviceLayout(); };
-
         _layout.Describe = DescribeButton;
         _layout.ButtonClicked += StartRecording;
         _picker.ActionChosen += SetSelectedButton;
         _picker.CancelClicked += () => _recorder.Cancel();
         _picker.EscapeCancelsChanged += on =>
         {
-            // A viewing preference: saved straight away, doesn't need the Save button.
+            // A preference: saved straight away, doesn't need the Save button.
             _cfg.EscapeCancels = on;
             _engine.Config.EscapeCancels = on;
             _recorder.EscapeCancels = on;
             try { ConfigStore.Save(_engine.Config); } catch (Exception ex) { Log.Error("Saving Escape setting failed", ex); }
         };
-
         _recorder.Changed += (soFar, held) =>
         {
             if (CurrentButtonLabel() is { } label) _picker.ShowRecording(label, soFar, held);
@@ -176,60 +241,54 @@ public sealed class SettingsForm : Form
             ShowSelectedButton();
         };
 
-        var legend = new Label
-        {
-            AutoSize = true,
-            Padding = new Padding(16, 6, 0, 0),
-            Text = "Green = set in this profile    Blue = from Default profile    Grey = factory",
-            ForeColor = SystemColors.GrayText,
-        };
-        var bindTop = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
-        bindTop.Controls.AddRange(new Control[]
-        {
-            new Label { Text = "Device:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }, _deviceKind, legend,
-        });
+        var bindTop = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Ui.Card };
+        var legend = new Legend { Dock = DockStyle.Right, Width = 430 };
+        bindTop.Controls.Add(_deviceKind);
+        bindTop.Controls.Add(legend);
+        _deviceKind.Location = new Point(0, 0);
 
-        var editor = new SplitContainer
-        {
-            Dock = DockStyle.Fill,
-            Orientation = Orientation.Horizontal,
-            SplitterWidth = 6,
-            BackColor = Theme.Background,
-        };
-        editor.Panel1.Controls.Add(_layout);
-        editor.Panel2.Controls.Add(_picker);
-        editor.HandleCreated += (_, _) => editor.SplitterDistance = Math.Max(150, editor.Height * 45 / 100);
+        // Top: device picture | what the selected button does + choices. Bottom: full-width keyboard.
+        var bindGrid = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 2, BackColor = Ui.Card };
+        bindGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46));
+        bindGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54));
+        bindGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 52));
+        bindGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+        bindGrid.Controls.Add(_layout, 0, 0);
+        bindGrid.Controls.Add(_picker.ActionsPanel, 1, 0);
+        bindGrid.Controls.Add(_picker.KeyboardPanel, 0, 1);
+        bindGrid.SetColumnSpan(_picker.KeyboardPanel, 2);
+        _picker.ActionsPanel.Dock = _picker.KeyboardPanel.Dock = DockStyle.Fill;
+        _layout.Margin = new Padding(0, 4, 8, 8);
+        _picker.ActionsPanel.Margin = new Padding(8, 4, 0, 8);
+        _picker.KeyboardPanel.Margin = new Padding(0, 6, 0, 0);
 
-        var bindsBox = new GroupBox { Text = "Keybinds — click a button on the device, then click what it should do", Dock = DockStyle.Fill };
-        bindsBox.Controls.Add(editor);
-        bindsBox.Controls.Add(bindTop);
+        var bindCard = new Card { Title = "Keybinds", Dock = DockStyle.Fill, Margin = Padding.Empty };
+        bindCard.Controls.Add(bindGrid);
+        bindCard.Controls.Add(bindTop);
 
-        var activationRow = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
-        activationRow.Controls.Add(new Label { Text = "Active:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
-        activationRow.Controls.Add(_activation);
-
-        var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, BackColor = Ui.Window };
+        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 118));
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        right.Controls.Add(_gamesBox, 0, 0);
-        right.Controls.Add(activationRow, 0, 1);
-        right.Controls.Add(bindsBox, 0, 2);
+        right.Controls.Add(header, 0, 0);
+        right.Controls.Add(gamesCard, 0, 1);
+        right.Controls.Add(bindCard, 0, 2);
+        header.Margin = gamesCard.Margin = bindCard.Margin = Padding.Empty;
+        gamesCard.Margin = new Padding(0, 0, 0, 14);
 
-        var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        split.Controls.Add(left, 0, 0);
-        split.Controls.Add(right, 1, 0);
-
-        _profiles.SelectedIndexChanged += (_, _) => { _recorder.Cancel(); ShowProfile(); };
-        page.Controls.Add(split);
+        var page = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, BackColor = Ui.Window };
+        page.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 236));
+        page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        page.Controls.Add(listCard, 0, 0);
+        page.Controls.Add(right, 1, 0);
+        right.Margin = Padding.Empty;
         return page;
     }
 
     private Profile? SelectedProfile => _profiles.SelectedItem as Profile;
     private IKeymapDevice? SelectedDevice =>
-        _deviceKind.SelectedIndex >= 0 ? _engine.Devices[_deviceKind.SelectedIndex] : null;
+        _deviceKind.SelectedIndex >= 0 && _deviceKind.SelectedIndex < _engine.Devices.Count ? _engine.Devices[_deviceKind.SelectedIndex] : null;
 
     private void FillProfiles(Profile? select = null)
     {
@@ -244,14 +303,44 @@ public sealed class SettingsForm : Form
     {
         var p = SelectedProfile;
         if (p == null) return;
-        _gamesBox.Enabled = !p.IsDefault;
-        _gamesBox.Text = p.IsDefault ? "Linked games (Default is used whenever no game profile matches)" : "Linked games";
-        _games.Items.Clear();
-        foreach (var g in p.Games) _games.Items.Add(g);
-        _activation.Enabled = !p.IsDefault;
+        _profileName.Text = p.Name;
+        _profileHint.Text = p.IsDefault
+            ? "Used on the desktop and in any game that doesn't have its own profile."
+            : "Binds you don't set here come from the Default profile.";
+        _rename.Visible = _delete.Visible = !p.IsDefault;
+
+        _chips.SuspendLayout();
+        _chips.Controls.Clear();
+        if (p.IsDefault)
+        {
+            _chips.Controls.Add(new TextLabel("The Default profile isn't linked to games. Create a profile for each game you want different binds in.", 10f, color: Ui.TextDim)
+            {
+                MaximumSize = new Size(560, 0),
+                Margin = new Padding(0, 6, 0, 0),
+            });
+        }
+        else
+        {
+            foreach (var g in p.Games)
+            {
+                var chip = new Chip(g);
+                chip.RemoveClicked += (_, _) => RemoveGame(g);
+                _chips.Controls.Add(chip);
+            }
+            var addRunning = new ModernButton { Text = "Add running game", Icon = Ui.IconAdd, Height = 30, Font = Ui.Font(9.5f), Margin = new Padding(0, 0, 8, 8) };
+            addRunning.Click += (_, _) => AddRunningGame();
+            var browse = new ModernButton { Text = "Browse…", Kind = ButtonKind.Ghost, Height = 30, Font = Ui.Font(9.5f), Margin = new Padding(0, 0, 8, 8) };
+            browse.Click += (_, _) => BrowseGame();
+            _chips.Controls.Add(addRunning);
+            _chips.Controls.Add(browse);
+        }
+        _chips.ResumeLayout();
+
+        _activationBox.Visible = !p.IsDefault;
         _activation.SelectedIndex = (int)p.Activation;
         _layout.Invalidate();
         ShowSelectedButton();
+        _profiles.Invalidate();
     }
 
     private void ShowDeviceLayout()
@@ -333,7 +422,8 @@ public sealed class SettingsForm : Form
 
     private void AddProfile(Profile? copyFrom)
     {
-        var name = Prompt.Ask(this, "New profile", "Profile name (e.g. the game's name):", copyFrom != null ? copyFrom.Name + " copy" : "");
+        var name = ModernDialog.Prompt(this, copyFrom == null ? "New profile" : "Duplicate profile",
+            "Name it after the game, e.g. \"Elden Ring\".", copyFrom != null ? copyFrom.Name + " copy" : "");
         if (string.IsNullOrWhiteSpace(name)) return;
         if (!NameIsFree(name)) return;
 
@@ -353,9 +443,8 @@ public sealed class SettingsForm : Form
 
     private void RenameProfile()
     {
-        if (SelectedProfile is not { } p) return;
-        if (p.IsDefault) { MessageBox.Show(this, "The Default profile can't be renamed.", Text); return; }
-        var name = Prompt.Ask(this, "Rename profile", "New name:", p.Name);
+        if (SelectedProfile is not { IsDefault: false } p) return;
+        var name = ModernDialog.Prompt(this, "Rename profile", "New name:", p.Name);
         if (string.IsNullOrWhiteSpace(name) || name.Trim() == p.Name || !NameIsFree(name)) return;
         p.Name = name.Trim();
         MarkDirty();
@@ -364,9 +453,8 @@ public sealed class SettingsForm : Form
 
     private void DeleteProfile()
     {
-        if (SelectedProfile is not { } p) return;
-        if (p.IsDefault) { MessageBox.Show(this, "The Default profile can't be deleted.", Text); return; }
-        if (MessageBox.Show(this, $"Delete profile '{p.Name}'?", Text, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        if (SelectedProfile is not { IsDefault: false } p) return;
+        if (!ModernDialog.Confirm(this, "Delete profile", $"Delete \"{p.Name}\"? Its keybinds and linked games will be removed.", "Delete", danger: true)) return;
         _cfg.Profiles.Remove(p);
         MarkDirty();
         FillProfiles();
@@ -376,7 +464,7 @@ public sealed class SettingsForm : Form
     {
         if (_cfg.Profiles.Any(x => string.Equals(x.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)))
         {
-            MessageBox.Show(this, "There's already a profile with that name.", Text);
+            ModernDialog.Info(this, "Name taken", "There's already a profile with that name.");
             return false;
         }
         return true;
@@ -403,8 +491,7 @@ public sealed class SettingsForm : Form
         var owner = _cfg.Profiles.FirstOrDefault(x => x != p && x.MatchesExe(exe));
         if (owner != null)
         {
-            if (MessageBox.Show(this, $"{exe} is linked to '{owner.Name}'. Move it to '{p.Name}'?", Text,
-                    MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            if (!ModernDialog.Confirm(this, "Already linked", $"{exe} is linked to \"{owner.Name}\". Move it to \"{p.Name}\"?", "Move it")) return;
             owner.Games.RemoveAll(g => string.Equals(g, exe, StringComparison.OrdinalIgnoreCase));
         }
         if (!p.MatchesExe(exe)) p.Games.Add(exe);
@@ -412,124 +499,165 @@ public sealed class SettingsForm : Form
         ShowProfile();
     }
 
-    private void RemoveGame()
+    private void RemoveGame(string exe)
     {
-        if (SelectedProfile is not { } p || _games.SelectedItem is not string exe) return;
+        if (SelectedProfile is not { } p) return;
         p.Games.Remove(exe);
         MarkDirty();
         ShowProfile();
     }
 
-    // ------------------------------------------------------------------ Lighting
+    // ================================================================== Lighting page
 
-    private TabPage BuildLightingTab()
+    private Control BuildLightingPage()
     {
-        var page = new TabPage("Lighting") { Padding = new Padding(12) };
-        var pick = new Button { Text = "Choose color…", AutoSize = true };
-        pick.Click += (_, _) =>
+        // Color card
+        _bigSwatch.Click += (_, _) => PickCustomColor();
+        foreach (var hex in PresetColors)
         {
-            using var dlg = new ColorDialog { FullOpen = true, Color = _swatch.BackColor };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            SetColor($"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}");
-        };
-        _hex.Leave += (_, _) =>
-        {
-            var h = _hex.Text.Trim();
-            if (!h.StartsWith('#')) h = "#" + h;
-            if (Lighting.LightingService.TryParseColor(h, out _)) SetColor(h.ToUpperInvariant());
-            else _hex.Text = _cfg.Color;
-        };
-        _lightingOn.CheckedChanged += (_, _) => { if (_cfg.Lighting.Enabled != _lightingOn.Checked) { _cfg.Lighting.Enabled = _lightingOn.Checked; MarkDirty(); } };
+            var s = new ColorSwatch { Size = new Size(34, 34), Color = ColorTranslator.FromHtml(hex), Margin = new Padding(0, 0, 10, 10) };
+            s.Click += (_, _) => SetColor(hex);
+            _presets.Add(s);
+        }
+        _hex.Box.Leave += (_, _) => ApplyHexBox();
+        _hex.Box.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ApplyHexBox(); } };
+        var custom = new ModernButton { Text = "Custom color…" };
+        custom.Click += (_, _) => PickCustomColor();
 
-        var browse = new Button { Text = "Browse…", AutoSize = true };
-        browse.Click += (_, _) =>
-        {
-            using var dlg = new OpenFileDialog { Filter = "OpenRGB|OpenRGB.exe|Programs (*.exe)|*.exe", Title = "Find OpenRGB.exe" };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            _openRgbPath.Text = dlg.FileName;
-        };
+        var presetFlow = new FlowLayoutPanel { Width = 300, Height = 92, BackColor = Ui.Card, Margin = new Padding(0, 6, 0, 0) };
+        presetFlow.Controls.AddRange(_presets.ToArray<Control>());
+        var hexRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Ui.Card, Margin = new Padding(0, 4, 0, 0) };
+        hexRow.Controls.Add(_hex);
+        hexRow.Controls.Add(custom);
+        var colorRight = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, BackColor = Ui.Card, Margin = new Padding(28, 0, 0, 0) };
+        colorRight.Controls.Add(new TextLabel("PRESETS", 8f, semibold: true, color: Ui.TextFaint));
+        colorRight.Controls.Add(presetFlow);
+        colorRight.Controls.Add(hexRow);
+        var colorRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, BackColor = Ui.Card };
+        colorRow.Controls.Add(_bigSwatch);
+        colorRow.Controls.Add(colorRight);
+        var colorCard = FixedCard("Color", 222);
+        colorCard.Controls.Add(colorRow);
+
+        // Devices card
+        _lightingOn.CheckedChanged += (_, _) => { if (_cfg.Lighting.Enabled != _lightingOn.Checked) { _cfg.Lighting.Enabled = _lightingOn.Checked; MarkDirty(); } };
+        var lightFlow = Stack(
+            _lightingOn,
+            new TextLabel("Naga Trinity, Tartarus Pro and Cynosa Chroma are set directly. Your mic, soundbar and control pod keep the color saved on them.", 9.5f, color: Ui.TextDim) { MaximumSize = new Size(680, 0), Margin = new Padding(52, 0, 0, 10) },
+            _lightingStatus);
+        _lightingStatus.Margin = new Padding(52, 0, 0, 0);
+        var lightCard = FixedCard("Razer devices", 170);
+        lightCard.Controls.Add(lightFlow);
+
+        // OpenRGB card
         _useOpenRgb.CheckedChanged += (_, _) =>
         {
-            _openRgbPath.Enabled = _useOpenRgb.Checked;
+            _openRgbPath.Enabled = _openRgbBrowse.Enabled = _useOpenRgb.Checked;
             if (_cfg.Lighting.UseOpenRgb != _useOpenRgb.Checked) { _cfg.Lighting.UseOpenRgb = _useOpenRgb.Checked; MarkDirty(); }
         };
-        _openRgbPath.TextChanged += (_, _) => { if (_cfg.Lighting.OpenRgbPath != _openRgbPath.Text) { _cfg.Lighting.OpenRgbPath = _openRgbPath.Text; MarkDirty(); } };
-
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        flow.Controls.Add(new Label
+        _openRgbPath.Box.TextChanged += (_, _) => { if (_cfg.Lighting.OpenRgbPath != _openRgbPath.Text) { _cfg.Lighting.OpenRgbPath = _openRgbPath.Text; MarkDirty(); } };
+        _openRgbBrowse.Click += (_, _) =>
         {
-            Text = "One static color, set directly on your Naga Trinity, Tartarus Pro and Cynosa Chroma. " +
-                   "Applied when you press Save, at startup, after sleep, and on reconnect.\n\n" +
-                   "The mic, soundbar and control pod keep the color saved on them (set it once in Synapse before uninstalling, " +
-                   "or turn on OpenRGB below if it supports them).",
-            AutoSize = true,
-            MaximumSize = new Size(560, 0),
-            Margin = new Padding(0, 0, 0, 12),
-        });
-        flow.Controls.Add(Row(new Label { Text = "Color:", AutoSize = true, Padding = new Padding(0, 8, 0, 0) }, _swatch, _hex, pick));
-        flow.Controls.Add(_lightingOn);
-        flow.Controls.Add(_useOpenRgb);
-        flow.Controls.Add(new Label { Text = "OpenRGB.exe (started hidden automatically if it isn't running):", AutoSize = true, Margin = new Padding(0, 4, 0, 2) });
-        flow.Controls.Add(Row(_openRgbPath, browse));
-        flow.Controls.Add(new Label { Text = "Status:", AutoSize = true, Margin = new Padding(0, 16, 0, 2) });
-        flow.Controls.Add(_lightingStatus);
-        page.Controls.Add(flow);
-        return page;
+            using var dlg = new OpenFileDialog { Filter = "OpenRGB|OpenRGB.exe|Programs (*.exe)|*.exe", Title = "Find OpenRGB.exe" };
+            if (dlg.ShowDialog(this) == DialogResult.OK) _openRgbPath.Text = dlg.FileName;
+        };
+        var pathRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Ui.Card, Margin = new Padding(52, 4, 0, 0) };
+        pathRow.Controls.Add(_openRgbPath);
+        pathRow.Controls.Add(_openRgbBrowse);
+        var orgbFlow = Stack(
+            _useOpenRgb,
+            new TextLabel("Optional. Only needed if you want Easy Razer to color devices it can't reach itself. OpenRGB is started hidden in the background.", 9.5f, color: Ui.TextDim) { MaximumSize = new Size(680, 0), Margin = new Padding(52, 0, 0, 4) },
+            pathRow);
+        var orgbCard = FixedCard("Other devices", 180);
+        orgbCard.Controls.Add(orgbFlow);
+
+        return Page("Lighting", "One color for everything. Applied when you save, at startup, after sleep and when a device is plugged in.",
+            colorCard, lightCard, orgbCard);
+    }
+
+    private void ApplyHexBox()
+    {
+        var h = _hex.Text.Trim();
+        if (!h.StartsWith('#')) h = "#" + h;
+        if (Lighting.LightingService.TryParseColor(h, out _)) SetColor(h.ToUpperInvariant());
+        else _hex.Text = _cfg.Color;
+    }
+
+    private void PickCustomColor()
+    {
+        using var dlg = new ColorDialog { FullOpen = true, Color = _bigSwatch.Color };
+        if (dlg.ShowDialog(this) == DialogResult.OK) SetColor($"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}");
     }
 
     private void SetColor(string hex)
     {
-        _swatch.BackColor = ColorTranslator.FromHtml(hex);
+        var c = ColorTranslator.FromHtml(hex);
+        _bigSwatch.Color = c;
         _hex.Text = hex;
+        foreach (var s in _presets) s.Selected = s.Color.ToArgb() == c.ToArgb();
         if (_cfg.Color != hex) { _cfg.Color = hex; MarkDirty(); }
     }
 
-    // ------------------------------------------------------------------ Devices
+    // ================================================================== Devices page
 
-    private TabPage BuildDevicesTab()
+    private Control BuildDevicesPage()
     {
-        var page = new TabPage("Devices") { Padding = new Padding(12) };
-        _devices.Columns.Add("Device", 160);
-        _devices.Columns.Add("Status", 520);
-        _devices.SelectedIndexChanged += (_, _) => ShowDevice();
-        _writeEnabled.CheckedChanged += (_, _) =>
+        foreach (var dev in _engine.Devices)
         {
-            if (_devices.SelectedIndices.Count == 0) return;
-            var dev = _engine.Devices[_devices.SelectedIndices[0]];
-            var s = _cfg.DeviceSettingsFor(dev.KindId);
-            if (s.KeymapWritesEnabled == _writeEnabled.Checked) return;
-            s.KeymapWritesEnabled = _writeEnabled.Checked;
-            MarkDirty();
-        };
+            var dot = new StatusDot { Margin = new Padding(0, 2, 0, 12) };
+            var card = FixedCard(dev.DisplayName, 0);
+            var body = Stack(dot);
 
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        flow.Controls.Add(new Label
+            ToggleSwitch? write = null;
+            if (dev is RazerKeymapDevice razer)
+            {
+                write = new ToggleSwitch { Text = "Write keybinds to this device" };
+                var kind = dev.KindId;
+                write.CheckedChanged += (_, _) =>
+                {
+                    var s = _cfg.DeviceSettingsFor(kind);
+                    if (s.KeymapWritesEnabled == write.Checked) return;
+                    s.KeymapWritesEnabled = write.Checked;
+                    MarkDirty();
+                };
+                var learn = new ModernButton { Text = "Learn keys…", Margin = new Padding(0, 6, 0, 0) };
+                learn.Click += (_, _) => LearnDevice(razer);
+                var learnHint = new TextLabel(dev is TartarusPro
+                        ? "Needed once before the Tartarus keybinds work: press each key as it lights up (about a minute)."
+                        : "Optional. Use it if a button does something different from what you set.", 9.5f, color: Ui.TextDim)
+                    { MaximumSize = new Size(680, 0), Margin = new Padding(0, 10, 0, 0) };
+                body.Controls.Add(write);
+                body.Controls.Add(learnHint);
+                body.Controls.Add(learn);
+            }
+            card.Height = dev is RazerKeymapDevice ? 228 : 110;
+            card.Controls.Add(body);
+            _deviceRows[dev.DisplayName] = (dot, write);
+            _deviceCards.Controls.Add(card);
+        }
+
+        // Lighting-only devices
+        foreach (var light in _engine.LightingDevices.Where(l => l is not IKeymapDevice))
         {
-            Text = "Devices listed here get per-game keybinds stored in their own memory. " +
-                   "Every other device (keyboard, mic, soundbar…) just gets the lighting color through OpenRGB.\n\n" +
-                   "\"Learn keys\" finds out how a device numbers its buttons: press each one when it lights up. " +
-                   "The Tartarus Pro needs this once before its keybinds work. The Naga Trinity works without it.",
-            AutoSize = true,
-            MaximumSize = new Size(600, 0),
-            Margin = new Padding(0, 12, 0, 8),
-        });
-        flow.Controls.Add(_writeEnabled);
-        var learn = new Button { Text = "Learn keys…", AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
-        learn.Click += (_, _) => LearnSelectedDevice();
-        flow.Controls.Add(learn);
+            var dot = new StatusDot();
+            var card = FixedCard(light.DisplayName, 120);
+            card.Controls.Add(Stack(dot, new TextLabel("Color only.", 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 6, 0, 0) }));
+            _deviceRows[light.DisplayName] = (dot, null);
+            _deviceCards.Controls.Add(card);
+        }
 
-        page.Controls.Add(flow);
-        page.Controls.Add(_devices);
+        Stretch(_deviceCards);
+        var page = new Panel { BackColor = Ui.Window };
+        page.Controls.Add(_deviceCards);
+        page.Controls.Add(PageHeader("Devices", "Close Synapse and Razer services first, or devices will show as not answering."));
         return page;
     }
 
-    private void LearnSelectedDevice()
+    private void LearnDevice(RazerKeymapDevice dev)
     {
-        if (_devices.SelectedIndices.Count == 0) return;
-        if (_engine.Devices[_devices.SelectedIndices[0]] is not RazerKeymapDevice dev) return;
         if (!dev.IsConnected)
         {
-            MessageBox.Show(this, $"{dev.DisplayName} isn't connected (or Synapse is still running).", Text);
+            ModernDialog.Info(this, "Not connected", $"{dev.DisplayName} isn't connected, or Synapse is still running.");
             return;
         }
         using var dlg = new LearnDialog(_engine, dev);
@@ -542,56 +670,55 @@ public sealed class SettingsForm : Form
         RefreshStatus();
     }
 
-    private void ShowDevice()
-    {
-        _writeEnabled.Enabled = _devices.SelectedIndices.Count > 0;
-        if (_devices.SelectedIndices.Count == 0) return;
-        var dev = _engine.Devices[_devices.SelectedIndices[0]];
-        _writeEnabled.Checked = _cfg.DeviceSettingsFor(dev.KindId).KeymapWritesEnabled;
-    }
-
     /// <summary>Called by the engine when device/lighting status changes.</summary>
     public void RefreshStatus()
     {
         if (IsDisposed) return;
-        var selected = _devices.SelectedIndices.Count > 0 ? _devices.SelectedIndices[0] : 0;
-        _devices.BeginUpdate();
-        _devices.Items.Clear();
-        foreach (var d in _engine.Devices) _devices.Items.Add(new ListViewItem(new[] { d.DisplayName, d.Status }));
-        _devices.EndUpdate();
-        if (_devices.Items.Count > 0) _devices.Items[Math.Min(selected, _devices.Items.Count - 1)].Selected = true;
+        foreach (var dev in _engine.Devices)
+        {
+            if (!_deviceRows.TryGetValue(dev.DisplayName, out var row)) continue;
+            row.Dot.Set(dev.IsConnected ? (dev.Status.Contains(" — ") ? DotState.Warning : DotState.Ok) : dev.Status.StartsWith("Plugged") ? DotState.Error : DotState.Off, dev.Status);
+            if (row.Write != null) row.Write.Checked = _cfg.DeviceSettingsFor(dev.KindId).KeymapWritesEnabled;
+        }
+        foreach (var light in _engine.LightingDevices.Where(l => l is not IKeymapDevice))
+            if (_deviceRows.TryGetValue(light.DisplayName, out var row))
+                row.Dot.Set(light.IsConnected ? DotState.Ok : DotState.Off, light.IsConnected ? "Connected" : "Not detected");
         _lightingStatus.Text = _engine.Lighting.Status;
+        _activeProfile.Text = _engine.ActiveProfile is { } a ? $"Active: {a.Name}" : "";
     }
 
-    // ------------------------------------------------------------------ General
+    // ================================================================== Settings page
 
-    private TabPage BuildGeneralTab()
+    private Control BuildSettingsPage()
     {
-        var page = new TabPage("General") { Padding = new Padding(12) };
         _autostart.Checked = Autostart.IsEnabled;
         _autostart.CheckedChanged += (_, _) =>
         {
             try { Autostart.Set(_autostart.Checked); }
-            catch (Exception ex) { MessageBox.Show(this, "Couldn't change startup setting: " + ex.Message, Text); }
+            catch (Exception ex) { ModernDialog.Info(this, "Couldn't change that", ex.Message); }
         };
+        var startup = FixedCard("Startup", 130);
+        startup.Controls.Add(Stack(_autostart,
+            new TextLabel("Closing this window keeps Easy Razer running in the tray. Use the tray icon's menu to exit.", 9.5f, color: Ui.TextDim) { Margin = new Padding(52, 0, 0, 0) }));
 
-        var openLog = new Button { Text = "Open log", AutoSize = true };
-        var openFolder = new Button { Text = "Open settings folder", AutoSize = true };
+        var openLog = new ModernButton { Text = "Open log", Icon = Ui.IconSearch };
+        var openFolder = new ModernButton { Text = "Open settings folder", Icon = Ui.IconFolder };
         openLog.Click += (_, _) => Shell(Log.FilePath);
         openFolder.Click += (_, _) => Shell(Paths.DataDir);
+        var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Ui.Card };
+        buttons.Controls.Add(openLog);
+        buttons.Controls.Add(openFolder);
+        var trouble = FixedCard("Troubleshooting", 150);
+        trouble.Controls.Add(Stack(
+            new TextLabel("If something doesn't work, the log says what the device answered.", 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 0, 0, 12) },
+            buttons));
 
-        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        flow.Controls.Add(_autostart);
-        flow.Controls.Add(Row(openLog, openFolder));
-        flow.Controls.Add(new Label
-        {
-            Text = "Closing this window keeps Easy Razer running in the tray. Use the tray icon's menu to exit.",
-            AutoSize = true,
-            MaximumSize = new Size(560, 0),
-            Margin = new Padding(0, 16, 0, 0),
-        });
-        page.Controls.Add(flow);
-        return page;
+        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "";
+        var about = FixedCard("About", 110);
+        about.Controls.Add(Stack(new TextLabel($"Easy Razer {version}", 10f, semibold: true),
+            new TextLabel("Per-game keybinds and lighting for Razer devices, without Synapse.", 9.5f, color: Ui.TextDim) { Margin = new Padding(0, 4, 0, 0) }));
+
+        return Page("Settings", "App preferences.", startup, trouble, about);
     }
 
     private static void Shell(string path)
@@ -607,51 +734,93 @@ public sealed class SettingsForm : Form
         }
     }
 
-    // ------------------------------------------------------------------ Save / load
+    // ================================================================== layout helpers
+
+    private const int CardWidth = 780;
+
+    private static Card FixedCard(string title, int height) => new()
+    {
+        Title = title,
+        Width = CardWidth,
+        Height = height,
+    };
+
+    private static FlowLayoutPanel Stack(params Control[] controls)
+    {
+        var p = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Ui.Card };
+        p.Controls.AddRange(controls);
+        return p;
+    }
+
+    /// <summary>Cards in a vertical page stretch to the page width.</summary>
+    private static void Stretch(FlowLayoutPanel flow)
+    {
+        flow.Resize += (_, _) =>
+        {
+            var w = Math.Max(560, flow.ClientSize.Width - 2);
+            foreach (Control c in flow.Controls) c.Width = w;
+        };
+    }
+
+    private static Control Page(string title, string subtitle, params Control[] cards)
+    {
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Ui.Window };
+        flow.Controls.AddRange(cards);
+        Stretch(flow);
+        var page = new Panel { BackColor = Ui.Window };
+        page.Controls.Add(flow);
+        page.Controls.Add(PageHeader(title, subtitle));
+        return page;
+    }
+
+    // ================================================================== save / load
 
     private void LoadFromConfig()
     {
         _picker.EscapeCancels = _cfg.EscapeCancels;
         _recorder.EscapeCancels = _cfg.EscapeCancels;
         FillProfiles();
-        if (_deviceKind.Items.Count > 0) _deviceKind.SelectedIndex = 0;
-        _swatch.BackColor = ColorTranslator.FromHtml(_cfg.Color);
-        _hex.Text = _cfg.Color;
+        _deviceKind.SelectedIndex = 0;
+        ShowDeviceLayout();
+        SetColor(_cfg.Color);
         _lightingOn.Checked = _cfg.Lighting.Enabled;
         _openRgbPath.Text = _cfg.Lighting.OpenRgbPath;
         _useOpenRgb.Checked = _cfg.Lighting.UseOpenRgb;
-        _openRgbPath.Enabled = _cfg.Lighting.UseOpenRgb;
+        _openRgbPath.Enabled = _openRgbBrowse.Enabled = _cfg.Lighting.UseOpenRgb;
         RefreshStatus();
         _dirty = false;
-        UpdateTitle();
+        UpdateDirtyUi();
     }
 
     private async Task SaveAsync()
     {
+        if (!_dirty) return;
         var colorChanged = _cfg.Color != _engine.Config.Color
                            || _cfg.Lighting.Enabled != _engine.Config.Lighting.Enabled
                            || _cfg.Lighting.UseOpenRgb != _engine.Config.Lighting.UseOpenRgb
                            || _cfg.Lighting.OpenRgbPath != _engine.Config.Lighting.OpenRgbPath;
-        var selected = SelectedProfile?.Name;
+        _save.Enabled = false;
+        _saveHint.Text = "Saving…";
         try
         {
             await _engine.UpdateConfigAsync(ConfigStore.DeepCopy(_cfg), colorChanged);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Saving failed: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ModernDialog.Info(this, "Saving failed", ex.Message);
+            UpdateDirtyUi();
             return;
         }
         _dirty = false;
-        UpdateTitle();
+        UpdateDirtyUi();
+        _saveHint.Text = "Saved";
         Saved?.Invoke();
-        if (selected != null) _profiles.SelectedItem = _cfg.Profiles.FirstOrDefault(p => p.Name == selected);
     }
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
     {
         if (!_dirty) return;
-        var answer = MessageBox.Show(this, "Save your changes?", Text, MessageBoxButtons.YesNoCancel);
+        var answer = ModernDialog.Ask(this, "Unsaved changes", "Save your changes before closing?", "Save", "Don't save");
         if (answer == DialogResult.Cancel) e.Cancel = true;
         else if (answer == DialogResult.Yes)
         {
@@ -664,40 +833,130 @@ public sealed class SettingsForm : Form
     private void MarkDirty()
     {
         _dirty = true;
-        UpdateTitle();
+        UpdateDirtyUi();
+        _profiles.Invalidate();
     }
 
-    private void UpdateTitle() => Text = _dirty ? "Easy Razer — unsaved changes" : "Easy Razer";
-
-    private static FlowLayoutPanel Row(params Control[] controls)
+    private void UpdateDirtyUi()
     {
-        var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        p.Controls.AddRange(controls);
-        return p;
+        _save.Enabled = _dirty;
+        _saveHint.Text = _dirty ? "Unsaved changes  ·  Ctrl+S" : "All changes saved";
+        _saveHint.ForeColor = _dirty ? Ui.Warning : Ui.TextFaint;
+        Text = _dirty ? "Easy Razer — unsaved changes" : "Easy Razer";
     }
 }
 
-/// <summary>Minimal text prompt (WinForms has none built in).</summary>
-internal static class Prompt
+// ====================================================================== small widgets used above
+
+/// <summary>App name with a green dot, top of the sidebar.</summary>
+internal sealed class BrandHeader : DrawnControl
 {
-    public static string? Ask(IWin32Window owner, string title, string label, string initial)
+    protected override void OnPaint(PaintEventArgs e)
     {
-        using var f = new Form
+        var g = e.Graphics;
+        g.Clear(Ui.Sidebar);
+        Ui.Smooth(g);
+        using (var b = new SolidBrush(Ui.Accent)) g.FillEllipse(b, 10, Height / 2f - 7, 14, 14);
+        Ui.DrawText(g, "Easy Razer", Ui.Font(14f, semibold: true), Ui.Text, new Rectangle(34, 0, Width - 34, Height));
+    }
+}
+
+/// <summary>Color key for the keybind picture.</summary>
+internal sealed class Legend : DrawnControl
+{
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Ui.Card);
+        Ui.Smooth(g);
+        var items = new[] { ("Set in this profile", Theme.Custom), ("From Default", Theme.Inherited), ("Device default", Ui.TextFaint) };
+        var x = Width;
+        for (var i = items.Length - 1; i >= 0; i--)
         {
-            Text = title,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ClientSize = new Size(360, 110),
+            var (text, color) = items[i];
+            var w = TextRenderer.MeasureText(text, Ui.Font(9f)).Width;
+            x -= w + 30;
+            using var b = new SolidBrush(color);
+            g.FillEllipse(b, x, Height / 2f - 5, 10, 10);
+            Ui.DrawText(g, text, Ui.Font(9f), Ui.TextDim, new Rectangle(x + 14, 0, w + 8, Height));
+        }
+    }
+}
+
+internal enum DotState { Off, Ok, Warning, Error }
+
+/// <summary>Colored dot + status text.</summary>
+internal sealed class StatusDot : DrawnControl
+{
+    private DotState _state;
+
+    public StatusDot()
+    {
+        Height = 24;
+        Width = 700;
+        Font = Ui.Font(10f);
+    }
+
+    public void Set(DotState state, string text)
+    {
+        _state = state;
+        Text = text;
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Ui.Card);
+        Ui.Smooth(g);
+        var color = _state switch
+        {
+            DotState.Ok => Ui.Accent,
+            DotState.Warning => Ui.Warning,
+            DotState.Error => Ui.Danger,
+            _ => Ui.TextFaint,
         };
-        var lbl = new Label { Text = label, Left = 12, Top = 12, AutoSize = true };
-        var box = new TextBox { Text = initial, Left = 12, Top = 36, Width = 336 };
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 192, Top = 72, Width = 75 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 273, Top = 72, Width = 75 };
-        f.Controls.AddRange(new Control[] { lbl, box, ok, cancel });
-        f.AcceptButton = ok;
-        f.CancelButton = cancel;
-        return f.ShowDialog(owner) == DialogResult.OK ? box.Text : null;
+        using (var b = new SolidBrush(color)) g.FillEllipse(b, 1, Height / 2f - 5, 10, 10);
+        Ui.DrawText(g, Text, Font, _state == DotState.Off ? Ui.TextDim : Ui.Text, new Rectangle(20, 0, Width - 20, Height));
+    }
+}
+
+/// <summary>Round color sample; click to choose it.</summary>
+internal sealed class ColorSwatch : DrawnControl
+{
+    private Color _color = Color.Lime;
+    private bool _selected;
+
+    public ColorSwatch() => Cursor = Cursors.Hand;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public Color Color { get => _color; set { _color = value; Invalidate(); } }
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool Selected { get => _selected; set { _selected = value; Invalidate(); } }
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool Big { get; set; }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Ui.Card);
+        Ui.Smooth(g);
+        var inset = Big ? 6 : 4;
+        var r = new RectangleF(inset, inset, Width - 2 * inset - 1, Height - 2 * inset - 1);
+        if (Big)
+        {
+            // soft glow in the color itself
+            using var glow = new SolidBrush(Color.FromArgb(45, _color));
+            g.FillEllipse(glow, 0, 0, Width - 1, Height - 1);
+        }
+        using (var b = new SolidBrush(_color)) g.FillEllipse(b, r);
+        using (var edge = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawEllipse(edge, r);
+        if (_selected || (Hover && !Big))
+        {
+            using var ring = new Pen(_selected ? Ui.Text : Ui.TextDim, 2f);
+            g.DrawEllipse(ring, 1, 1, Width - 3, Height - 3);
+        }
     }
 }
