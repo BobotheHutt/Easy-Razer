@@ -1,0 +1,249 @@
+using System.Diagnostics;
+using EasyRazer.Config;
+using EasyRazer.Devices;
+using EasyRazer.Devices.Razer;
+using EasyRazer.Lighting;
+using HidSharp;
+using Microsoft.Win32;
+using Timer = System.Windows.Forms.Timer;
+
+namespace EasyRazer.Core;
+
+/// <summary>
+/// Decides which profile should be active and pushes it to the devices.
+/// Lives on the UI thread; device I/O happens on a background task, one write at a time.
+/// </summary>
+public sealed class ProfileEngine : IDisposable
+{
+    private readonly ForegroundWatcher _watcher = new();
+    private readonly LightingService _lighting = new();
+    private readonly SemaphoreSlim _deviceGate = new(1, 1);
+    private readonly SynchronizationContext _ui;
+
+    private readonly Timer _debounce = new() { Interval = 250 };
+    private readonly Timer _runningCheck = new() { Interval = 5000 };
+    private readonly Timer _hotplug = new() { Interval = 2000 };
+
+    private string? _pendingExe;
+    private Profile? _active;
+    private Profile? _lastRunningProfile; // most recent "while running" profile that was focused
+
+    public AppConfig Config { get; private set; }
+    public IReadOnlyList<IKeymapDevice> Devices { get; } = new List<IKeymapDevice> { new TartarusPro(), new NagaTrinity() };
+    public LightingService Lighting => _lighting;
+    public Profile? ActiveProfile => _active;
+
+    /// <summary>Raised on the UI thread when the active profile changes (or is re-applied).</summary>
+    public event Action<Profile>? ProfileApplied;
+    /// <summary>Raised on the UI thread when device or lighting status text changes.</summary>
+    public event Action? StatusChanged;
+
+    public ProfileEngine(AppConfig config)
+    {
+        Config = config;
+        _ui = SynchronizationContext.Current ?? new SynchronizationContext();
+
+        _watcher.ForegroundChanged += exe =>
+        {
+            _pendingExe = exe;
+            _debounce.Stop();
+            _debounce.Start();
+        };
+        _debounce.Tick += (_, _) =>
+        {
+            _debounce.Stop();
+            Evaluate(_pendingExe, force: false);
+        };
+        _runningCheck.Tick += (_, _) => Evaluate(ForegroundWatcher.CurrentExe(), force: false);
+        _hotplug.Tick += async (_, _) =>
+        {
+            _hotplug.Stop();
+            await OnHardwareChangedAsync();
+        };
+
+        DeviceList.Local.Changed += (_, _) => _ui.Post(_ => { _hotplug.Stop(); _hotplug.Start(); }, null);
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+    }
+
+    public async Task StartAsync()
+    {
+        Log.Info("Easy Razer starting");
+        await RefreshDevicesAsync();
+        _ = _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+        // Make sure the device's own memory holds the desktop binds, so it behaves even if we're not running.
+        await WriteAsync(Config.DefaultProfile, persist: true);
+        Evaluate(ForegroundWatcher.CurrentExe(), force: true);
+    }
+
+    /// <summary>Called by the settings window after the user saves.</summary>
+    public async Task UpdateConfigAsync(AppConfig newConfig, bool colorChanged)
+    {
+        Config = newConfig;
+        ConfigStore.Save(Config);
+        Log.Info("Settings saved");
+
+        if (colorChanged) _ = _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+        await RefreshDevicesAsync();
+        await WriteAsync(Config.DefaultProfile, persist: true);
+        _active = null; // profile objects were replaced; force a re-apply
+        Evaluate(ForegroundWatcher.CurrentExe(), force: true);
+    }
+
+    public void SetPaused(bool paused)
+    {
+        Config.PauseSwitching = paused;
+        ConfigStore.Save(Config);
+        Log.Info(paused ? "Automatic switching paused" : "Automatic switching resumed");
+        Evaluate(ForegroundWatcher.CurrentExe(), force: true);
+    }
+
+    public Task ReapplyLightingAsync() => _lighting.ApplyAsync(Config).ContinueWith(_ => RaiseStatus());
+
+    /// <summary>Pick the right profile for the given foreground exe and apply it if it changed.</summary>
+    private void Evaluate(string? foregroundExe, bool force)
+    {
+        var target = Choose(foregroundExe);
+        _runningCheck.Enabled = target.Activation == ActivationMode.WhileRunning && !target.IsDefault;
+
+        if (!force && ReferenceEquals(target, _active)) return;
+
+        var previous = _active;
+        _active = target;
+        if (previous != null && previous != target)
+            Log.Info($"Profile: {previous.Name} -> {target.Name}" + (foregroundExe != null ? $" ({foregroundExe})" : ""));
+
+        _ = WriteAsync(target, persist: false).ContinueWith(_ => _ui.Post(_ => ProfileApplied?.Invoke(target), null));
+    }
+
+    private Profile Choose(string? exe)
+    {
+        if (Config.PauseSwitching) return Config.DefaultProfile;
+
+        // 1. The program in front has its own profile.
+        if (exe != null)
+        {
+            var match = Config.Profiles.FirstOrDefault(p => !p.IsDefault && p.MatchesExe(exe));
+            if (match != null)
+            {
+                if (match.Activation == ActivationMode.WhileRunning) _lastRunningProfile = match;
+                return match;
+            }
+        }
+
+        // 2. A "keep while running" game is still open in the background.
+        if (_lastRunningProfile != null && Config.Profiles.Contains(_lastRunningProfile) && IsAnyRunning(_lastRunningProfile))
+            return _lastRunningProfile;
+        _lastRunningProfile = null;
+
+        // 3. Desktop.
+        return Config.DefaultProfile;
+    }
+
+    private static bool IsAnyRunning(Profile p)
+    {
+        foreach (var game in p.Games)
+        {
+            var name = Path.GetFileNameWithoutExtension(game);
+            var procs = Process.GetProcessesByName(name);
+            var running = procs.Length > 0;
+            foreach (var proc in procs) proc.Dispose();
+            if (running) return true;
+        }
+        return false;
+    }
+
+    private async Task WriteAsync(Profile profile, bool persist)
+    {
+        await _deviceGate.WaitAsync();
+        try
+        {
+            await Task.Run(() =>
+            {
+                foreach (var dev in Devices.Where(d => d.IsConnected))
+                {
+                    try
+                    {
+                        dev.Apply(EffectiveBindings(profile, dev.KindId), Config.DeviceSettingsFor(dev.KindId), persist);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"{dev.DisplayName}: applying '{profile.Name}' failed", ex);
+                    }
+                }
+            });
+        }
+        finally
+        {
+            _deviceGate.Release();
+            RaiseStatus();
+        }
+    }
+
+    /// <summary>Game profile binds, falling back to the Default profile's binds, then factory.</summary>
+    private IReadOnlyDictionary<string, KeyAction> EffectiveBindings(Profile profile, string kindId)
+    {
+        var result = new Dictionary<string, KeyAction>(Config.DefaultProfile.BindingsFor(kindId));
+        if (!profile.IsDefault)
+            foreach (var (button, action) in profile.BindingsFor(kindId))
+                if (action.Type != ActionType.Default)
+                    result[button] = action;
+        return result;
+    }
+
+    private async Task RefreshDevicesAsync()
+    {
+        await _deviceGate.WaitAsync();
+        try
+        {
+            await Task.Run(() =>
+            {
+                foreach (var dev in Devices)
+                {
+                    try { dev.Refresh(Config.DeviceSettingsFor(dev.KindId)); }
+                    catch (Exception ex) { Log.Error($"{dev.DisplayName}: detection failed", ex); }
+                }
+            });
+        }
+        finally
+        {
+            _deviceGate.Release();
+            RaiseStatus();
+        }
+    }
+
+    private async Task OnHardwareChangedAsync()
+    {
+        var before = Devices.Where(d => d.IsConnected).Select(d => d.KindId).ToHashSet();
+        await RefreshDevicesAsync();
+        var newlyConnected = Devices.Any(d => d.IsConnected && !before.Contains(d.KindId));
+        if (newlyConnected)
+        {
+            Log.Info("Device plugged in, re-applying profile");
+            if (_active != null) await WriteAsync(_active, persist: false);
+        }
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != PowerModes.Resume) return;
+        _ui.Post(async _ =>
+        {
+            Log.Info("Resumed from sleep, re-applying everything");
+            await Task.Delay(5000); // USB devices take a moment to come back
+            await RefreshDevicesAsync();
+            await ReapplyLightingAsync();
+            Evaluate(ForegroundWatcher.CurrentExe(), force: true);
+        }, null);
+    }
+
+    private void RaiseStatus() => _ui.Post(_ => StatusChanged?.Invoke(), null);
+
+    public void Dispose()
+    {
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _watcher.Dispose();
+        _debounce.Dispose();
+        _runningCheck.Dispose();
+        _hotplug.Dispose();
+    }
+}

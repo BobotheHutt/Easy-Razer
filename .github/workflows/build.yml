@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish single-file exe
+        run: >
+          dotnet publish src/EasyRazer/EasyRazer.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EasyRazer
+          path: publish/EasyRazer.exe
+
+      # Every push to main replaces the "latest" release, so the newest exe is always one click away.
+      - name: Update "latest" release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest publish/EasyRazer.exe \
+            --prerelease \
+            --title "Latest build" \
+            --notes "Automatic build of commit ${GITHUB_SHA::7}. Windows may show a SmartScreen warning because the exe isn't code-signed: click 'More info' then 'Run anyway'."
