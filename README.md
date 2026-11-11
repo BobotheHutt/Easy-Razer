@@ -10,6 +10,8 @@ A small Windows tray app that replaces the parts of Razer Synapse I actually use
 
 Not included: Chroma effects, general macros, cloud sync, firmware updates, audio settings.
 
+![Profiles](docs/img/profiles.png)
+
 ## How it works
 
 | Part | How |
