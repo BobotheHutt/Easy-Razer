@@ -116,6 +116,11 @@ public enum ActionType
     Disabled,
     Key,
     Mouse,
+    /// <summary>
+    /// Press once: the device starts clicking <see cref="KeyAction.Mouse"/> continuously.
+    /// Press again: it stops. Runs on the device itself (onboard macro).
+    /// </summary>
+    AutoClickToggle,
 }
 
 public enum MouseAction
@@ -142,6 +147,9 @@ public sealed class KeyAction
     public bool Alt { get; set; }
 
     public MouseAction Mouse { get; set; }
+
+    /// <summary>Clicks per second for <see cref="ActionType.AutoClickToggle"/>.</summary>
+    public int ClicksPerSecond { get; set; } = 15;
 
     public KeyAction Clone() => (KeyAction)MemberwiseClone();
 

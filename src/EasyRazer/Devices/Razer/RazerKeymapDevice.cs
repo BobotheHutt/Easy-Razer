@@ -22,6 +22,7 @@ public abstract class RazerKeymapDevice : IKeymapDevice
     protected const byte ActionMouse = 0x01;
     protected const byte ActionKeyboard = 0x02;
     protected const byte ActionDpi = 0x06;
+    protected const byte ActionAutoClickToggle = 0x03; // onboard macro, toggle playback
 
     private RazerHidLink? _link;
     private string _status = "Not detected";
@@ -126,6 +127,15 @@ public abstract class RazerKeymapDevice : IKeymapDevice
                 type = ActionMouse;
                 parameters = new byte[] { MouseCode(action.Mouse), 0x00 };
                 break;
+            case ActionType.AutoClickToggle:
+            {
+                // UNVERIFIED: real devices likely need the click macro uploaded first and the button
+                // pointed at it; the capture of Synapse assigning your toggle macro will show how.
+                type = ActionAutoClickToggle;
+                var ms = (ushort)Math.Clamp(1000 / Math.Max(1, action.ClicksPerSecond), 1, 1000);
+                parameters = new byte[] { MouseCode(action.Mouse), (byte)(ms >> 8), (byte)ms };
+                break;
+            }
             case ActionType.Key:
                 if (!HidKeys.TryGetUsage(action.Key, out var usage)) return null;
                 type = ActionKeyboard;

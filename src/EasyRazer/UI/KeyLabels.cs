@@ -59,6 +59,7 @@ public static class KeyLabels
         {
             case ActionType.Disabled: return "Off";
             case ActionType.Mouse: return Mouse(a.Mouse);
+            case ActionType.AutoClickToggle: return $"Auto {a.Mouse.ToString().ToLowerInvariant()} click {a.ClicksPerSecond}/s (toggle)";
             case ActionType.Key:
                 var main = Enum.TryParse<Keys>(a.Key, out var k) ? KeyLong(k) : a.Key ?? "?";
                 var mods = (a.Ctrl ? "Ctrl+" : "") + (a.Shift ? "Shift+" : "") + (a.Alt ? "Alt+" : "");

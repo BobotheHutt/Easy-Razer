@@ -32,6 +32,18 @@ public sealed class BindingPicker : UserControl
     private readonly CheckBox _shift = Toggle("Shift");
     private readonly CheckBox _alt = Toggle("Alt");
     private readonly List<Button> _mouseButtons = new();
+    private readonly Button _autoLeft = Flat("Auto left click");
+    private readonly Button _autoRight = Flat("Auto right click");
+    private readonly NumericUpDown _autoRate = new()
+    {
+        Minimum = 2,
+        Maximum = 50,
+        Value = 15,
+        Width = 56,
+        BackColor = Theme.Key,
+        ForeColor = Theme.Text,
+        Margin = new Padding(3, 6, 0, 0),
+    };
     private readonly Button _disable = Flat("Disable");
     private readonly Button _reset = Flat("Reset to default");
 
@@ -75,6 +87,13 @@ public sealed class BindingPicker : UserControl
             b.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Mouse, Mouse = m });
             _mouseButtons.Add(b);
         }
+        _autoLeft.Click += (_, _) => EmitAutoClick(MouseAction.Left);
+        _autoRight.Click += (_, _) => EmitAutoClick(MouseAction.Right);
+        _autoRate.ValueChanged += (_, _) =>
+        {
+            if (_loading || _current is not { Type: ActionType.AutoClickToggle } cur) return;
+            EmitAutoClick(cur.Mouse);
+        };
         _disable.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Disabled });
         _reset.Click += (_, _) => Emit(new KeyAction { Type = ActionType.Default });
         _cancel.Click += (_, _) => CancelClicked?.Invoke();
@@ -94,6 +113,7 @@ public sealed class BindingPicker : UserControl
         var mouseRow = Row(Dim("Mouse:"));
         mouseRow.Controls.AddRange(_mouseButtons
             .Where(b => (MouseAction)b.Tag! is not (MouseAction.DpiUp or MouseAction.DpiDown)).ToArray<Control>());
+        var autoRow = Row(Dim("Toggle (press once = start, again = stop):"), _autoLeft, _autoRight, _autoRate, Dim("clicks/sec"));
         var otherRow = Row(Dim("Other:"));
         otherRow.Controls.AddRange(_mouseButtons
             .Where(b => (MouseAction)b.Tag! is MouseAction.DpiUp or MouseAction.DpiDown).ToArray<Control>());
@@ -108,7 +128,7 @@ public sealed class BindingPicker : UserControl
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
-        bottom.Controls.AddRange(new Control[] { modRow, mouseRow, otherRow });
+        bottom.Controls.AddRange(new Control[] { modRow, mouseRow, autoRow, otherRow });
 
         Controls.Add(_keyboard);
         Controls.Add(bottom);
@@ -186,8 +206,21 @@ public sealed class BindingPicker : UserControl
         _keyboard.ChosenKey = effective.Type == ActionType.Key && Enum.TryParse<Keys>(effective.Key, out var k) ? k : null;
         HighlightMouse(effective.Type == ActionType.Mouse ? effective.Mouse : null);
         _disable.BackColor = effective.Type == ActionType.Disabled ? ChosenFill : Theme.Key;
+        var auto = effective.Type == ActionType.AutoClickToggle;
+        _autoLeft.BackColor = auto && effective.Mouse == MouseAction.Left ? ChosenFill : Theme.Key;
+        _autoRight.BackColor = auto && effective.Mouse == MouseAction.Right ? ChosenFill : Theme.Key;
+        _loading = true;
+        if (auto) _autoRate.Value = Math.Clamp(effective.ClicksPerSecond, (int)_autoRate.Minimum, (int)_autoRate.Maximum);
+        _loading = false;
         _reset.Enabled = setHere != null;
     }
+
+    private void EmitAutoClick(MouseAction button) => Emit(new KeyAction
+    {
+        Type = ActionType.AutoClickToggle,
+        Mouse = button,
+        ClicksPerSecond = (int)_autoRate.Value,
+    });
 
     private void Emit(KeyAction action)
     {
@@ -199,7 +232,7 @@ public sealed class BindingPicker : UserControl
     private void SetEnabled(bool on)
     {
         _keyboard.Enabled = on;
-        foreach (Control c in new Control[] { _ctrl, _shift, _alt, _disable, _reset }) c.Enabled = on;
+        foreach (Control c in new Control[] { _ctrl, _shift, _alt, _disable, _reset, _autoLeft, _autoRight, _autoRate }) c.Enabled = on;
         foreach (var b in _mouseButtons) b.Enabled = on;
     }
 

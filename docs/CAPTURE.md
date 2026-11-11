@@ -37,8 +37,13 @@ You need Synapse installed for this step, so do it **before** uninstalling Synap
       front button under the wheel → O, back button under the wheel → P
    9. Front button under the wheel → back to **DPI up** (Synapse's sensitivity option), then the
       back one → **DPI down**
-   10. Switch Synapse to a different profile, then back.
-   11. Use Synapse's "reset to default" for the whole device, if it has one.
+   10. Put your **auto left-click toggle macro** back on the front button under the wheel, and the
+       **auto right-click** one on the back button (set to toggle, as you normally use them).
+       Then press each one once to start it and once to stop it.
+   11. If Synapse lets you change the macro's click delay, change it once (e.g. 50 ms → 100 ms)
+       and write down both values.
+   12. Switch Synapse to a different profile, then back.
+   13. Use Synapse's "reset to default" for the whole device, if it has one.
 3. Press the red square (Stop) in Wireshark.
 4. **File → Save As**, name it `naga-trinity.pcapng`.
 

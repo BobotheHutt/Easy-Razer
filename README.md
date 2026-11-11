@@ -6,7 +6,9 @@ A small Windows tray app that replaces the parts of Razer Synapse I actually use
   Profiles switch automatically when a linked game comes to the front. No window has to be open.
 - **One static color** for every RGB device, set from one place (via OpenRGB).
 
-Not included: Chroma effects, macros, cloud sync, firmware updates, audio settings.
+- **Toggle auto-click** (press once to start fast left/right clicking, again to stop), stored on the mouse.
+
+Not included: Chroma effects, general macros, cloud sync, firmware updates, audio settings.
 
 ## How it works
 
